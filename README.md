@@ -49,8 +49,15 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 
 ## Prerequisites
 
-1. **Meta Portal / Portal+** rooted and running Android 9 (Aloha/OpenPortal) with Google Play Services and Google App installed.
-2. **Google App (GSA):** Tested with version `17.6.59.ve.arm64` or later.
+1. **Meta Portal / Portal+** rooted and running Android 9 (Aloha/OpenPortal) with Google Play Services installed.
+2. **Google App (GSA):**
+   - **Package:** `com.google.android.googlequicksearchbox`
+   - **Tested / Verified Version:** **`17.6.59.ve.arm64`** (Version code: `301698282`, minSdk 28, targetSdk 36, `arm64-v8a`).
+   - *(Note: Older builds such as GSA 14.14 prematurely terminate voice intents in `HandsFreeActivity`. GSA `17.6.59.ve.arm64` or modern Play Store builds are required for stable assistant activation).*
+   - You can verify your installed version with:
+     ```bash
+     adb shell dumpsys package com.google.android.googlequicksearchbox | grep versionName
+     ```
 3. **Computer with ADB:** Connected to your Portal over USB or Wi-Fi (`adb connect <portal-ip>:5555`).
 
 ---
