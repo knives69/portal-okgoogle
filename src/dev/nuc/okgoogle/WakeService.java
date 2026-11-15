@@ -37,7 +37,9 @@ import java.util.Locale;
  */
 public class WakeService extends Service {
     private static final String TAG = "okgoogle";
+    private static final boolean DEBUG = false;
     private static final int RATE = 16000;
+    private static final int VOICE_AMP_THRESHOLD = 600;
     private static final String GSA = "com.google.android.googlequicksearchbox";
     public static final String MODEL_PATH = "/sdcard/Android/data/dev.nuc.okgoogle/files/model";
 
@@ -218,6 +220,7 @@ public class WakeService extends Service {
             int stalls = 0;
             int silences = 0;
             long lastAmpLog = 0;
+            long lastVoiceTime = 0;
             String lastPartial = "";
 
             while (alive) {
@@ -254,22 +257,28 @@ public class WakeService extends Service {
                     silences = 0;
                 }
 
-                if (System.currentTimeMillis() - lastAmpLog > 2500) {
+                if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
                     lastAmpLog = System.currentTimeMillis();
                     Log.i(TAG, "mic alive, amp=" + amp);
                 }
 
+                boolean hasVoice = (amp >= VOICE_AMP_THRESHOLD);
+                if (hasVoice) lastVoiceTime = System.currentTimeMillis();
+                boolean activeSpeech = (System.currentTimeMillis() - lastVoiceTime < 1800);
+
                 if (!r.acceptWaveForm(buf, n)) {
-                    String partial = textOf(r.getPartialResult());
-                    if (partial != null && !partial.equals(lastPartial)) {
-                        lastPartial = partial;
-                        Log.i(TAG, "partial=\"" + partial + "\" amp=" + amp);
-                        if (hasWake(partial)) return partial;
+                    if (activeSpeech) {
+                        String partial = textOf(r.getPartialResult());
+                        if (partial != null && !partial.equals(lastPartial)) {
+                            lastPartial = partial;
+                            if (DEBUG) Log.i(TAG, "partial=\"" + partial + "\" amp=" + amp);
+                            if (hasWake(partial)) return partial;
+                        }
                     }
                 } else {
                     String fin = textOf(r.getResult());
                     if (fin != null && !fin.isEmpty()) {
-                        Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
+                        if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
                         if (hasWake(fin)) return fin;
                     }
                     lastPartial = "";
