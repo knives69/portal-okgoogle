@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+gen/
+classes/
+*.dex
+*.apk
+*.idsig
+*.zip
+
+# IDE & Editor files
+.idea/
+*.iml
+.gradle/
+.vscode/
+
+# OS / temporary files
+.DS_Store
+*.swp
+*~
