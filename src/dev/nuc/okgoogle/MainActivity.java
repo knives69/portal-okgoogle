@@ -31,7 +31,7 @@ import java.io.File;
 import java.io.FileReader;
 
 /**
- * MainActivity — Modern Material 3 dashboard for Portal Ok Google.
+ * MainActivity — Modern Material 3 dashboard for Portal Ok Google (English Edition).
  * Features:
  * - Dynamic Day / Night mode tracking Android system theme.
  * - Live acoustic telemetry card (model language, active status, VAD adaptation).
@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private TextView statHealthValue;
     private Button toggleBtn;
     private TextView themeSubText;
+    private Button themeBtn;
     private TextView vadLabel;
     private SeekBar vadSeekBar;
 
@@ -180,7 +181,7 @@ public class MainActivity extends Activity {
         titleRow.addView(titleText);
 
         TextView verChip = new TextView(this);
-        verChip.setText("v1.4.0");
+        verChip.setText("v1.5.1");
         verChip.setTextSize(10);
         verChip.setTypeface(Typeface.DEFAULT_BOLD);
         verChip.setTextColor(colAccentBlue);
@@ -210,7 +211,7 @@ public class MainActivity extends Activity {
         statusCard.setBackground(makeRoundedCard(colSurface, colSurfaceBorder, 16, 1));
 
         TextView cardLabel = new TextView(this);
-        cardLabel.setText("ESTADO DEL RECONOCIMIENTO");
+        cardLabel.setText("RECOGNITION STATUS");
         cardLabel.setTextSize(11);
         cardLabel.setTypeface(Typeface.DEFAULT_BOLD);
         cardLabel.setTextColor(colTextTertiary);
@@ -242,9 +243,9 @@ public class MainActivity extends Activity {
         LinearLayout statsList = new LinearLayout(this);
         statsList.setOrientation(LinearLayout.VERTICAL);
 
-        statModelValue = addStatRow(statsList, "Modelo Acústico", "Cargando...");
-        statStreamValue = addStatRow(statsList, "Flujo de Audio", "16,000 Hz · 16-bit Mono PCM");
-        statHealthValue = addStatRow(statsList, "Supervisión", "Watchdog Nivel 1 & 2 Activo");
+        statModelValue = addStatRow(statsList, "Acoustic Model", "Loading...");
+        statStreamValue = addStatRow(statsList, "Audio Stream", "16,000 Hz · 16-bit Mono PCM");
+        statHealthValue = addStatRow(statsList, "Supervision", "Watchdog Level 1 & 2 Active");
 
         statusCard.addView(statsList);
         root.addView(statusCard);
@@ -290,7 +291,7 @@ public class MainActivity extends Activity {
         testRow.setLayoutParams(testParams);
 
         Button testAssistantBtn = new Button(this);
-        testAssistantBtn.setText("PROBAR ASISTENTE");
+        testAssistantBtn.setText("TEST ASSISTANT");
         testAssistantBtn.setTextSize(12);
         testAssistantBtn.setTextColor(colTextPrimary);
         testAssistantBtn.setBackground(makePill(colSurfaceElevated, colSurfaceBorder, 10));
@@ -303,7 +304,7 @@ public class MainActivity extends Activity {
         testRow.addView(testAssistantBtn);
 
         Button testChimeBtn = new Button(this);
-        testChimeBtn.setText("PROBAR TIMBRE");
+        testChimeBtn.setText("TEST CHIME");
         testChimeBtn.setTextSize(12);
         testChimeBtn.setTextColor(colTextPrimary);
         testChimeBtn.setBackground(makePill(colSurfaceElevated, colSurfaceBorder, 10));
@@ -328,7 +329,7 @@ public class MainActivity extends Activity {
         settingsCard.setLayoutParams(setCardParams);
 
         TextView setLabel = new TextView(this);
-        setLabel.setText("AJUSTES Y PREFERENCIAS");
+        setLabel.setText("SETTINGS & PREFERENCES");
         setLabel.setTextSize(11);
         setLabel.setTypeface(Typeface.DEFAULT_BOLD);
         setLabel.setTextColor(colTextTertiary);
@@ -348,7 +349,7 @@ public class MainActivity extends Activity {
         themeTextCol.setLayoutParams(ttColParams);
 
         TextView themeTitle = new TextView(this);
-        themeTitle.setText("Aspecto Visual (Tema)");
+        themeTitle.setText("Appearance (Theme)");
         themeTitle.setTextSize(14);
         themeTitle.setTypeface(Typeface.DEFAULT_BOLD);
         themeTitle.setTextColor(colTextPrimary);
@@ -360,7 +361,7 @@ public class MainActivity extends Activity {
         themeTextCol.addView(themeSubText);
         themeRow.addView(themeTextCol);
 
-        final Button themeBtn = new Button(this);
+        themeBtn = new Button(this);
         themeBtn.setTextSize(11);
         themeBtn.setTypeface(Typeface.DEFAULT_BOLD);
         themeBtn.setTextColor(colAccentBlue);
@@ -384,7 +385,7 @@ public class MainActivity extends Activity {
 
         // Switch: Google Nest Chime
         Switch chimeSwitch = new Switch(this);
-        chimeSwitch.setText("Tono de activación (Earcon)");
+        chimeSwitch.setText("Wake chime sound (Earcon)");
         chimeSwitch.setTextSize(14);
         chimeSwitch.setTypeface(Typeface.DEFAULT_BOLD);
         chimeSwitch.setTextColor(colTextPrimary);
@@ -402,7 +403,7 @@ public class MainActivity extends Activity {
 
         // Switch: Auto-dismiss 12s
         Switch autoDismissSwitch = new Switch(this);
-        autoDismissSwitch.setText("Auto-cierre del Asistente (12s)");
+        autoDismissSwitch.setText("Smart auto-dismiss (12s)");
         autoDismissSwitch.setTextSize(14);
         autoDismissSwitch.setTypeface(Typeface.DEFAULT_BOLD);
         autoDismissSwitch.setTextColor(colTextPrimary);
@@ -427,7 +428,7 @@ public class MainActivity extends Activity {
         settingsCard.addView(vadLabel);
 
         TextView vadDesc = new TextView(this);
-        vadDesc.setText("Suelo de energía acústica mínima (el filtro se auto-adapta al ruido de fondo)");
+        vadDesc.setText("Minimum acoustic energy baseline (filter auto-adapts to ambient noise)");
         vadDesc.setTextSize(12);
         vadDesc.setTextColor(colTextSecondary);
         vadDesc.setPadding(0, 0, 0, dp(8));
@@ -441,7 +442,7 @@ public class MainActivity extends Activity {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int val = progress + 200;
-                vadLabel.setText("Sensibilidad de Voz: " + val + " (Auto-Adaptativa)");
+                vadLabel.setText("Voice Sensitivity Floor: " + val + " (Auto-Adapting)");
                 if (fromUser) {
                     sp.edit().putInt(WakeService.PREF_VAD_THRESHOLD, val).apply();
                 }
@@ -455,7 +456,7 @@ public class MainActivity extends Activity {
 
         // 6. FOOTER
         TextView footer = new TextView(this);
-        footer.setText("Meta Portal+ Edition · Vosk Offline Speech Recognition");
+        footer.setText("Meta Portal+ Edition · Offline Speech Recognition");
         footer.setTextSize(11);
         footer.setTextColor(colTextTertiary);
         footer.setGravity(Gravity.CENTER);
@@ -509,48 +510,58 @@ public class MainActivity extends Activity {
         }
 
         if (!running) {
-            statusBadge.setText("■  DETENIDO");
+            statusBadge.setText("■  STOPPED");
             statusBadge.setTextColor(Color.parseColor("#EA4335"));
             statusBadge.setBackground(makePill(isDark ? Color.parseColor("#331212") : Color.parseColor("#FCE8E6"),
                     Color.parseColor("#EA4335"), 12));
-            toggleBtn.setText("▶  INICIAR ESCUCHA");
+            toggleBtn.setText("▶  START LISTENING");
             toggleBtn.setTextColor(Color.WHITE);
             toggleBtn.setBackground(makePill(colAccentBlue, 0, 14));
-            if (statHealthValue != null) statHealthValue.setText("Servicio inactivo");
+            if (statHealthValue != null) statHealthValue.setText("Service inactive");
         } else if (healthy) {
-            statusBadge.setText("●  ACTIVO · ESCUCHANDO 24/7");
+            statusBadge.setText("●  ACTIVE · LISTENING 24/7");
             statusBadge.setTextColor(Color.parseColor("#34A853"));
             statusBadge.setBackground(makePill(isDark ? Color.parseColor("#122E1D") : Color.parseColor("#E6F4EA"),
                     Color.parseColor("#34A853"), 12));
-            toggleBtn.setText("⏹  DETENER ESCUCHA");
+            toggleBtn.setText("⏹  STOP LISTENING");
             toggleBtn.setTextColor(Color.WHITE);
             toggleBtn.setBackground(makePill(Color.parseColor("#D93025"), 0, 14));
-            if (statHealthValue != null) statHealthValue.setText("Saludable · Micro entregando datos PCM");
+            if (statHealthValue != null) statHealthValue.setText("Healthy · Mic streaming PCM data");
         } else {
-            statusBadge.setText("▲  REANUDANDO FLUJO DE AUDIO");
+            statusBadge.setText("▲  RECOVERING AUDIO STREAM");
             statusBadge.setTextColor(Color.parseColor("#FBBC04"));
             statusBadge.setBackground(makePill(isDark ? Color.parseColor("#332608") : Color.parseColor("#FEF7E0"),
                     Color.parseColor("#FBBC04"), 12));
-            toggleBtn.setText("⏹  DETENER ESCUCHA");
+            toggleBtn.setText("⏹  STOP LISTENING");
             toggleBtn.setTextColor(Color.WHITE);
             toggleBtn.setBackground(makePill(Color.parseColor("#D93025"), 0, 14));
-            if (statHealthValue != null) statHealthValue.setText("Recuperando stream colgado...");
+            if (statHealthValue != null) statHealthValue.setText("Recovering frozen stream...");
         }
 
         if (themeSubText != null) {
             if (themeMode == 1) {
-                themeSubText.setText("Modo Oscuro forzado");
+                themeSubText.setText("Forced Dark mode");
             } else if (themeMode == 2) {
-                themeSubText.setText("Modo Claro forzado");
+                themeSubText.setText("Forced Light mode");
             } else {
-                themeSubText.setText("Siguiendo al sistema (" + (isDark ? "Oscuro" : "Claro") + ")");
+                themeSubText.setText("Following system theme (" + (isDark ? "Dark" : "Light") + ")");
+            }
+        }
+
+        if (themeBtn != null) {
+            if (themeMode == 1) {
+                themeBtn.setText("DARK");
+            } else if (themeMode == 2) {
+                themeBtn.setText("LIGHT");
+            } else {
+                themeBtn.setText("SYSTEM");
             }
         }
 
         SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
         int currentVad = sp.getInt(WakeService.PREF_VAD_THRESHOLD, WakeService.DEFAULT_VAD_THRESHOLD);
         if (vadLabel != null) {
-            vadLabel.setText("Sensibilidad de Voz: " + currentVad + " (Auto-Adaptativa)");
+            vadLabel.setText("Voice Sensitivity Floor: " + currentVad + " (Auto-Adapting)");
         }
     }
 
@@ -577,20 +588,20 @@ public class MainActivity extends Activity {
         File readme = new File(WakeService.MODEL_PATH, "README");
         if (!readme.exists()) {
             boolean hasAm = new File(WakeService.MODEL_PATH, "am").isDirectory();
-            return hasAm ? "Listo (Idioma no especificado)" : "Modelo no encontrado";
+            return hasAm ? "Ready (Language unspecified)" : "Model not found";
         }
         try (BufferedReader br = new BufferedReader(new FileReader(readme))) {
             String firstLine = br.readLine();
             if (firstLine != null) {
                 String low = firstLine.toLowerCase();
                 if (low.contains("spanish") || low.contains("espanol")) {
-                    return "Español (vosk-model-small-es)";
+                    return "Spanish (vosk-model-small-es)";
                 } else if (low.contains("english")) {
                     return "English (vosk-model-small-en-us)";
                 }
             }
         } catch (Throwable ignored) { }
-        return "Listo para captura";
+        return "Ready for capture";
     }
 
     private GradientDrawable makeRoundedCard(int bgColor, int borderColor, float radiusDp, int strokeDp) {
