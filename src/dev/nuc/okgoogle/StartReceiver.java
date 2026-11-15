@@ -46,6 +46,9 @@ public class StartReceiver extends BroadcastReceiver {
             scheduleWatchdog(context);
             WakeService.restartIfUnhealthy(context);
             return;
+        } else if (Intent.ACTION_BOOT_COMPLETED.equals(action) && !sp.getBoolean(FgTracker.PREF_ENABLED, true)) {
+            Log.i(TAG, "Boot completed: service explicitly disabled by user preference, not starting");
+            return;
         } else {
             Log.i(TAG, "Start broadcast received (" + action + "), starting WakeService");
             sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();
