@@ -165,7 +165,7 @@ When you open the **Portal Ok Google** app on your device:
 - **TEST CHIME:** Plays the Google Assistant-style confirmation chime on the Portal speakers.
 - **Play chime on wake word:** Toggle audio feedback on/off when "Ok Google" is recognized.
 - **Auto-dismiss Assistant (12s idle):** Toggle automatic dismissal of the Assistant card after 12s of inactivity.
-- **Mic Voice Sensitivity (RMS Energy):** Real-time slider (200 – 1400, default 450) to calibrate the root-mean-square acoustic energy threshold required to awaken Kaldi acoustic inference.
+- **Mic Voice Sensitivity Floor:** Real-time slider (200 – 1400, default 450) to calibrate the baseline quiet-room sensitivity floor. In noisy environments (TV, air conditioning, refrigerator), an **asymmetric noise-floor follower** dynamically raises the trigger threshold (+7 dB above ambient background noise), ensuring the Kaldi neural net sleeps even with background sounds.
 
 ---
 
@@ -173,7 +173,8 @@ When you open the **Portal Ok Google** app on your device:
 
 Designed specifically for embedded smart displays like the Meta Portal+:
 - **RAM Usage:** ~174 MB total PSS (~4.5% of the Portal's 4GB RAM). Native Kaldi neural network graph resides in native heap; Java Heap uses `< 1 MB`.
-- **CPU Idle (Audio Thread):** **~1.7% of a single core** (~0.2% total SoC load). During silence, the Kaldi neural network is completely bypassed, reading PCM and computing RMS with a 200ms circular pre-roll buffer to prevent phonetic clipping.
+- **CPU Idle (Quiet Room):** **~1.7% of a single core** (~0.2% total SoC load). During silence, the Kaldi neural network is completely bypassed.
+- **CPU Idle (Noisy Room with TV/AC):** **~2–4% of a single core**. The adaptive noise-floor tracker prevents constant background noise from awakening acoustic inference, while user voice (+7 dB SNR) triggers instantaneously with a 200ms circular pre-roll buffer.
 - **Log Noise:** All debug logging is disabled by default for silent, zero-overhead operation.
 
 ---

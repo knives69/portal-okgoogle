@@ -309,6 +309,7 @@ public class WakeService extends Service {
             int[] preRollLen = new int[2];
             int preRollIdx = 0;
             boolean inSpeech = false;
+            float noiseFloor = 250.0f; // Initial ambient acoustic floor estimate
 
             while (alive) {
                 int n = rec.read(buf, 0, buf.length);
@@ -344,6 +345,20 @@ public class WakeService extends Service {
                 int rms = (samples > 0) ? (int) Math.sqrt(sumSq / samples) : 0;
                 long amp = peak;
 
+                // Adaptive noise floor tracking (asymmetric envelope follower)
+                if (rms < noiseFloor) {
+                    // Room got quieter: adapt downwards quickly (~1.5s tau)
+                    noiseFloor = 0.92f * noiseFloor + 0.08f * rms;
+                } else if (!inSpeech) {
+                    // Constant background sound (TV/AC): adapt upwards slowly (~12s tau)
+                    // Ignored during active speech so user voice never inflates the floor
+                    noiseFloor = 0.992f * noiseFloor + 0.008f * rms;
+                }
+                if (noiseFloor < 100.0f) noiseFloor = 100.0f;
+
+                // Dynamic trigger threshold: base sensitivity floor or 2.2x ambient noise (+7 dB SNR)
+                int effectiveThreshold = Math.max(vadThreshold, (int) (noiseFloor * 2.2f));
+
                 // AudioPolicy silence detection: zeroed buffers indicate background muting
                 if (peak == 0) {
                     if (++silences > 12) {
@@ -356,10 +371,10 @@ public class WakeService extends Service {
 
                 if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
                     lastAmpLog = System.currentTimeMillis();
-                    Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " thresh=" + vadThreshold + " inSpeech=" + inSpeech);
+                    Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " floor=" + (int) noiseFloor + " effThresh=" + effectiveThreshold + " inSpeech=" + inSpeech);
                 }
 
-                boolean hasVoice = (rms >= vadThreshold);
+                boolean hasVoice = (rms >= effectiveThreshold);
                 if (hasVoice) {
                     lastVoiceTime = System.currentTimeMillis();
                 }

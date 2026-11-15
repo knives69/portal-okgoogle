@@ -145,7 +145,7 @@ public class MainActivity extends Activity {
 
         vadLabel = new TextView(this);
         int currentVad = sp.getInt(WakeService.PREF_VAD_THRESHOLD, WakeService.DEFAULT_VAD_THRESHOLD);
-        vadLabel.setText("Voice Sensitivity (RMS Energy: " + currentVad + ")");
+        vadLabel.setText("Voice Sensitivity Floor: " + currentVad + " (Auto-Adapts)");
         vadLabel.setPadding(0, 16, 0, 4);
         settingsCard.addView(vadLabel);
 
@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int val = progress + 200;
-                vadLabel.setText("Voice Sensitivity (RMS Energy: " + val + ")");
+                vadLabel.setText("Voice Sensitivity Floor: " + val + " (Auto-Adapts)");
                 if (fromUser) {
                     sp.edit().putInt(WakeService.PREF_VAD_THRESHOLD, val).apply();
                 }
