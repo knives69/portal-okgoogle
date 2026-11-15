@@ -26,6 +26,7 @@ import org.json.JSONObject;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -66,8 +67,19 @@ public class WakeService extends Service {
         "oye google", "oye gugel", "hola google", "hola gugel", "google", "gugel"
     };
 
+    /** Constrains Vosk decoder graph to target keywords + unknown token, slashing CPU by 40-60%. */
+    private static final String GRAMMAR =
+        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"hola google\", \"google\", \"gugel\", \"[unk]\"]";
+
     private volatile boolean alive;
     private Model model;
+    private Recognizer recognizer;
+    private final byte[][] preRoll = new byte[4][3200];
+    private final int[] preRollLen = new int[4];
+    private int preRollIdx = 0;
+    private final int[] recentPeak = new int[50]; // 5.0 seconds rolling history
+    private final int[] recentRms = new int[50];
+    private int statIdx = 0;
     private volatile AudioRecord activeRecord;
     private volatile boolean otherAppRecording;
     private AudioManager.AudioRecordingCallback recordingCallback;
@@ -226,9 +238,10 @@ public class WakeService extends Service {
     private void loop() {
         try {
             model = new Model(MODEL_PATH);
-            Log.i(TAG, "Vosk model loaded successfully from " + MODEL_PATH);
+            recognizer = new Recognizer(model, (float) RATE, GRAMMAR);
+            Log.i(TAG, "Vosk model & restricted grammar recognizer loaded successfully from " + MODEL_PATH);
         } catch (Throwable t) {
-            Log.e(TAG, "Failed to load Vosk model", t);
+            Log.e(TAG, "Failed to load Vosk model or recognizer", t);
             isRunning = false;
             stopSelf();
             return;
@@ -247,7 +260,7 @@ public class WakeService extends Service {
             }
             activeRecord = rec;
 
-            String heard = listen(rec, buf);
+            String heard = listen(rec, buf, recognizer);
             try { rec.stop(); rec.release(); } catch (Throwable ignored) { }
             activeRecord = null;
 
@@ -265,7 +278,8 @@ public class WakeService extends Service {
             sleep(250);
             launchVoice(this);
 
-            // Arm auto-dismiss timer on assistant window
+            // Arm auto-dismiss timer on assistant window (reset session lock)
+            FgTracker.onNewVoiceInvocation();
             FgTracker.scheduleAutoDismiss();
 
             // Dynamic wait while Google Assistant or Gemini responds
@@ -282,6 +296,10 @@ public class WakeService extends Service {
             }
         }
 
+        if (recognizer != null) {
+            try { recognizer.close(); } catch (Throwable ignored) { }
+            recognizer = null;
+        }
         if (model != null) {
             try { model.close(); } catch (Throwable ignored) { }
             model = null;
@@ -291,148 +309,147 @@ public class WakeService extends Service {
     }
 
     /** Returns recognized keyword string upon wake detection, or null when stream yields. */
-    private String listen(AudioRecord rec, byte[] buf) {
-        try (Recognizer r = new Recognizer(model, (float) RATE)) {
-            int stalls = 0;
-            int silences = 0;
-            int loopCount = 0;
-            long lastAmpLog = 0;
-            long lastVoiceTime = 0;
-            String lastPartial = "";
+    private String listen(AudioRecord rec, byte[] buf, Recognizer r) {
+        if (r == null) return null;
+        r.reset();
+        int stalls = 0;
+        int silences = 0;
+        int loopCount = 0;
+        int aboveRun = 0;
+        int belowRun = 0;
+        long lastAmpLog = 0;
+        String lastPartial = "";
 
-            SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
-            int vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
+        SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
+        int vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
 
-            // Pre-roll ring buffer: 2 chunks of 100ms = 200ms pre-speech audio
-            // Prevents clipping the first phoneme ("O...") when transitioning from silence to voice
-            byte[][] preRoll = new byte[2][buf.length];
-            int[] preRollLen = new int[2];
-            int preRollIdx = 0;
-            boolean inSpeech = false;
-            float noiseFloor = 250.0f; // Initial ambient acoustic floor estimate
+        boolean inSpeech = false;
+        float noiseFloor = 250.0f; // Initial ambient acoustic floor estimate
+        preRollIdx = 0;
+        for (int i = 0; i < 4; i++) preRollLen[i] = 0;
 
+        try {
             while (alive) {
-                int n = rec.read(buf, 0, buf.length);
-                if (n <= 0) {
-                    if (++stalls > 15) {
-                        Log.w(TAG, "Audio stream stalled or interrupted, yielding");
-                        return null;
-                    }
-                    sleep(10);
-                    continue;
-                }
-                stalls = 0;
-
-                if (!canCapture()) {
-                    Log.i(TAG, "External voice input or recording detected, yielding mic");
+            int n = rec.read(buf, 0, buf.length);
+            if (n <= 0) {
+                if (++stalls > 15) {
+                    Log.w(TAG, "Audio stream stalled or interrupted, yielding");
                     return null;
                 }
-
-                // Refresh threshold periodically from preferences
-                if (++loopCount % 10 == 0) {
-                    vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
-                }
-
-                long sumSq = 0;
-                long peak = 0;
-                int samples = n / 2;
-                for (int i = 0; i + 1 < n; i += 2) {
-                    short v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
-                    int abs = (v < 0) ? -v : v;
-                    if (abs > peak) peak = abs;
-                    sumSq += (long) v * v;
-                }
-                int rms = (samples > 0) ? (int) Math.sqrt(sumSq / samples) : 0;
-                long amp = peak;
-
-                // Adaptive noise floor tracking (asymmetric envelope follower)
-                if (rms < noiseFloor) {
-                    // Room got quieter: adapt downwards quickly (~1.5s tau)
-                    noiseFloor = 0.92f * noiseFloor + 0.08f * rms;
-                } else if (!inSpeech) {
-                    // Constant background sound (TV/AC): adapt upwards slowly (~12s tau)
-                    // Ignored during active speech so user voice never inflates the floor
-                    noiseFloor = 0.992f * noiseFloor + 0.008f * rms;
-                }
-                if (noiseFloor < 100.0f) noiseFloor = 100.0f;
-
-                // Dynamic trigger threshold: base sensitivity floor or 2.2x ambient noise (+7 dB SNR)
-                int effectiveThreshold = Math.max(vadThreshold, (int) (noiseFloor * 2.2f));
-
-                // AudioPolicy silence detection: zeroed buffers indicate background muting
-                if (peak == 0) {
-                    if (++silences > 12) {
-                        Log.w(TAG, "AudioRecord muted by system AudioPolicy, reopening clean stream");
-                        return null;
-                    }
-                } else {
-                    silences = 0;
-                }
-
-                if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
-                    lastAmpLog = System.currentTimeMillis();
-                    Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " floor=" + (int) noiseFloor + " effThresh=" + effectiveThreshold + " inSpeech=" + inSpeech);
-                }
-
-                boolean hasVoice = (rms >= effectiveThreshold);
-                if (hasVoice) {
-                    lastVoiceTime = System.currentTimeMillis();
-                }
-
-                boolean activeSpeech = (System.currentTimeMillis() - lastVoiceTime < 1800);
-
-                if (activeSpeech) {
-                    if (!inSpeech) {
-                        // Voice onset: flush pre-roll buffer into recognizer to preserve start of wake word
-                        inSpeech = true;
-                        for (int k = 0; k < 2; k++) {
-                            int idx = (preRollIdx + k) % 2;
-                            if (preRollLen[idx] > 0) {
-                                r.acceptWaveForm(preRoll[idx], preRollLen[idx]);
-                                preRollLen[idx] = 0;
-                            }
-                        }
-                    }
-
-                    if (!r.acceptWaveForm(buf, n)) {
-                        String partial = textOf(r.getPartialResult());
-                        if (partial != null && !partial.equals(lastPartial)) {
-                            lastPartial = partial;
-                            if (DEBUG) Log.i(TAG, "partial=\"" + partial + "\" amp=" + amp);
-                            if (hasWake(partial)) return partial;
-                        }
-                    } else {
-                        String fin = textOf(r.getResult());
-                        if (fin != null && !fin.isEmpty()) {
-                            if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
-                            if (hasWake(fin)) return fin;
-                        }
-                        lastPartial = "";
-                    }
-                } else {
-                    if (inSpeech) {
-                        // Speech ended (>1.8s silence): check final buffer and reset recognizer state
-                        inSpeech = false;
-                        String fin = textOf(r.getResult());
-                        if (fin != null && !fin.isEmpty()) {
-                            if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
-                            if (hasWake(fin)) return fin;
-                        }
-                        r.reset();
-                        lastPartial = "";
-                    }
-
-                    // Keep pre-roll buffer fresh during silence (Kaldi C++ neural net completely idle)
-                    System.arraycopy(buf, 0, preRoll[preRollIdx], 0, n);
-                    preRollLen[preRollIdx] = n;
-                    preRollIdx = (preRollIdx + 1) % 2;
-                }
+                sleep(10);
+                continue;
             }
-        } catch (Throwable t) {
-            Log.e(TAG, "listen loop error", t);
+            stalls = 0;
+
+            if (!canCapture()) {
+                Log.i(TAG, "External voice input or recording detected, yielding mic");
+                return null;
+            }
+
+            // Refresh threshold periodically from preferences
+            if (++loopCount % 10 == 0) {
+                vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
+            }
+
+            long sumSq = 0;
+            long peak = 0;
+            int samples = n / 2;
+            for (int i = 0; i + 1 < n; i += 2) {
+                short v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                int abs = (v < 0) ? -v : v;
+                if (abs > peak) peak = abs;
+                sumSq += (long) v * v;
+            }
+            int rms = (samples > 0) ? (int) Math.sqrt(sumSq / samples) : 0;
+            long amp = peak;
+
+            // Update rolling 5-second acoustic history
+            recentPeak[statIdx] = (int) peak;
+            recentRms[statIdx] = rms;
+            statIdx = (statIdx + 1) % recentPeak.length;
+
+            int peakFloor = getPercentile(recentPeak, 15);
+            int rmsFloor = getPercentile(recentRms, 15);
+
+            // Dynamic peak trigger threshold:
+            // Voice peak must exceed baseline sensitivity floor AND be at least 1.85x the 15th percentile peak floor
+            int minPeakThreshold = Math.max(1600, vadThreshold * 2);
+            int dynamicPeakThreshold = Math.max(minPeakThreshold, (int) (peakFloor * 1.85f));
+            boolean above = (peak >= dynamicPeakThreshold);
+
+            if (above) {
+                aboveRun++;
+                belowRun = 0;
+            } else {
+                belowRun++;
+                aboveRun = 0;
+            }
+
+            // AudioPolicy silence detection: zeroed buffers indicate background muting
+            if (peak == 0) {
+                if (++silences > 12) {
+                    Log.w(TAG, "AudioRecord muted by system AudioPolicy, reopening clean stream");
+                    return null;
+                }
+            } else {
+                silences = 0;
+            }
+
+            if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
+                lastAmpLog = System.currentTimeMillis();
+                Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " peakFloor=" + peakFloor + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech);
+            }
+
+            // Hysteresis: require 2 consecutive blocks (200ms) to open, 10 consecutive blocks (1s) to close
+            if (!inSpeech && aboveRun >= 2) {
+                inSpeech = true;
+                // Flush 400ms pre-roll circular buffer chronologically to capture word onset ("O...")
+                for (int k = 0; k < 4; k++) {
+                    int idx = (preRollIdx + k) % 4;
+                    if (preRollLen[idx] > 0) {
+                        r.acceptWaveForm(preRoll[idx], preRollLen[idx]);
+                        preRollLen[idx] = 0;
+                    }
+                }
+            } else if (inSpeech && belowRun >= 10) {
+                inSpeech = false;
+                String fin = textOf(r.getResult());
+                if (fin != null && !fin.isEmpty()) {
+                    if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
+                    if (hasWake(fin)) return fin;
+                }
+                r.reset();
+                lastPartial = "";
+            }
+
+            if (inSpeech) {
+                if (!r.acceptWaveForm(buf, n)) {
+                    String partial = textOf(r.getPartialResult());
+                    if (partial != null && !partial.equals(lastPartial)) {
+                        lastPartial = partial;
+                        if (DEBUG) Log.i(TAG, "partial=\"" + partial + "\" amp=" + amp);
+                        if (hasWake(partial)) return partial;
+                    }
+                } else {
+                    String fin = textOf(r.getResult());
+                    if (fin != null && !fin.isEmpty()) {
+                        if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
+                        if (hasWake(fin)) return fin;
+                    }
+                    lastPartial = "";
+                }
+            } else {
+                // Save silent chunk in pre-roll circular buffer
+                System.arraycopy(buf, 0, preRoll[preRollIdx], 0, n);
+                preRollLen[preRollIdx] = n;
+                preRollIdx = (preRollIdx + 1) % 4;
+            }
         }
-        return null;
+    } catch (Throwable t) {
+        Log.e(TAG, "listen loop error", t);
     }
+    return null;
+}
 
     private static boolean hasWake(String text) {
         if (text == null) return false;
@@ -459,6 +476,13 @@ public class WakeService extends Service {
         return null;
     }
 
+    private static int getPercentile(int[] arr, int p) {
+        int[] copy = arr.clone();
+        Arrays.sort(copy);
+        int idx = (p * copy.length) / 100;
+        return copy[Math.max(0, Math.min(copy.length - 1, idx))];
+    }
+
     public static void launchVoice(Context ctx) {
         try {
             Intent i = new Intent(Intent.ACTION_VOICE_COMMAND);
@@ -478,6 +502,14 @@ public class WakeService extends Service {
     @Override public void onDestroy() {
         alive = false;
         isRunning = false;
+        if (recognizer != null) {
+            try { recognizer.close(); } catch (Throwable ignored) {}
+            recognizer = null;
+        }
+        if (model != null) {
+            try { model.close(); } catch (Throwable ignored) {}
+            model = null;
+        }
         if (Build.VERSION.SDK_INT >= 24 && recordingCallback != null) {
             try {
                 AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);

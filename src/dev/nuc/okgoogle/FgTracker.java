@@ -25,6 +25,7 @@ public class FgTracker extends AccessibilityService {
     static volatile String foregroundClass = "";
     static volatile boolean voiceInputActive = false;
     private static volatile boolean autoDismissScheduled = false;
+    private static volatile boolean dismissedForCurrentSession = false;
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final Runnable autoDismissRunnable = new Runnable() {
@@ -88,6 +89,11 @@ public class FgTracker extends AccessibilityService {
         checkAssistantOverlayState();
     }
 
+    public static void onNewVoiceInvocation() {
+        dismissedForCurrentSession = false;
+        autoDismissScheduled = false;
+    }
+
     private static void checkAssistantOverlayState() {
         if (instance == null) return;
         boolean isAssistantOverlay = GSA.equalsIgnoreCase(foregroundPackage);
@@ -95,12 +101,16 @@ public class FgTracker extends AccessibilityService {
         if (isAssistantOverlay) {
             scheduleAutoDismiss();
         } else {
+            dismissedForCurrentSession = false;
             cancelAutoDismiss();
         }
     }
 
     public static void scheduleAutoDismiss() {
         if (instance == null) return;
+        if (dismissedForCurrentSession) {
+            return; // Already fired BACK once this turn; do not re-arm and close foreground apps
+        }
         SharedPreferences sp = instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         boolean enabled = sp.getBoolean(PREF_AUTO_DISMISS, true);
         if (!enabled) return;
@@ -125,6 +135,7 @@ public class FgTracker extends AccessibilityService {
 
     private static void triggerAutoDismiss() {
         autoDismissScheduled = false;
+        dismissedForCurrentSession = true; // Lock out further dismiss calls until new invocation
         Log.i(TAG, "triggerAutoDismiss fired! pkg=" + foregroundPackage);
         if (instance == null) return;
         boolean stillAssistant = GSA.equalsIgnoreCase(foregroundPackage);
