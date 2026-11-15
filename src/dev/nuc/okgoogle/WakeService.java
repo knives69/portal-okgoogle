@@ -215,10 +215,6 @@ public class WakeService extends Service {
                         if (anotherActive != otherAppRecording) {
                             otherAppRecording = anotherActive;
                             Log.i(TAG, "Hardware recording monitor: otherAppRecording=" + otherAppRecording);
-                            if (!otherAppRecording) {
-                                // Recording finished — arm auto-dismiss timer on assistant card
-                                FgTracker.scheduleAutoDismiss();
-                            }
                         }
                     }
                 };

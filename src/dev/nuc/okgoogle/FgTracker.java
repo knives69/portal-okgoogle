@@ -72,8 +72,7 @@ public class FgTracker extends AccessibilityService {
             updateState();
         } else if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             // User intentionally clicked a button or card: reset the timer
-            autoDismissScheduled = false;
-            scheduleAutoDismiss();
+            resetAutoDismissTimer();
         }
     }
 
@@ -101,6 +100,11 @@ public class FgTracker extends AccessibilityService {
         if (isVoice != voiceInputActive) {
             voiceInputActive = isVoice;
             Log.i(TAG, "voiceInputActive=" + voiceInputActive + " (pkg=" + foregroundPackage + " cls=" + foregroundClass + ")");
+            if (!voiceInputActive && GSA.equalsIgnoreCase(foregroundPackage)) {
+                // Speech recognition completed and Assistant result/suggestions card is displayed:
+                // reset the 15s timer so the user has the full window to read and interact.
+                resetAutoDismissTimer();
+            }
         }
 
         checkAssistantOverlayState();
@@ -123,6 +127,15 @@ public class FgTracker extends AccessibilityService {
         }
     }
 
+    public static void resetAutoDismissTimer() {
+        if (instance == null) return;
+        if (!GSA.equalsIgnoreCase(foregroundPackage)) return;
+        if (dismissedForCurrentSession) return;
+        autoDismissScheduled = false;
+        mainHandler.removeCallbacks(autoDismissRunnable);
+        scheduleAutoDismiss();
+    }
+
     public static void scheduleAutoDismiss() {
         if (instance == null) return;
         if (dismissedForCurrentSession) {
@@ -131,6 +144,10 @@ public class FgTracker extends AccessibilityService {
         SharedPreferences sp = instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         boolean enabled = sp.getBoolean(PREF_AUTO_DISMISS, true);
         if (!enabled) return;
+
+        if (autoDismissScheduled) {
+            return; // Already armed! Do not reset countdown on background polling or subtle UI animations
+        }
 
         autoDismissScheduled = true;
         Log.i(TAG, "scheduleAutoDismiss: armed for " + AUTO_DISMISS_DELAY_MS + "ms");
@@ -161,10 +178,15 @@ public class FgTracker extends AccessibilityService {
         Log.i(TAG, "triggerAutoDismiss fired! pkg=" + foregroundPackage + " stillAssistant=" + stillAssistant);
 
         if (stillAssistant) {
+            if (voiceInputActive) {
+                Log.i(TAG, "triggerAutoDismiss: voiceInputActive=true, postponing 5s");
+                autoDismissScheduled = true;
+                mainHandler.postDelayed(autoDismissRunnable, 5000);
+                return;
+            }
             dismissedForCurrentSession = true;
-            Log.i(TAG, "Assistant card idle timeout (12s) reached: auto-dismissing via BACK");
-            boolean ok = instance.performGlobalAction(GLOBAL_ACTION_BACK);
-            Log.i(TAG, "performGlobalAction(GLOBAL_ACTION_BACK) result=" + ok);
+            Log.i(TAG, "Assistant card idle timeout (15s) reached: auto-dismissing via BACK");
+            instance.performGlobalAction(GLOBAL_ACTION_BACK);
 
             mainHandler.postDelayed(new Runnable() {
                 @Override
@@ -178,12 +200,31 @@ public class FgTracker extends AccessibilityService {
                         } catch (Throwable ignored) { }
 
                         if (GSA.equalsIgnoreCase(foregroundPackage)) {
-                            Log.i(TAG, "Assistant still visible after first BACK, sending secondary BACK");
+                            Log.i(TAG, "Assistant still visible after 1st BACK, sending secondary BACK");
                             instance.performGlobalAction(GLOBAL_ACTION_BACK);
+
+                            mainHandler.postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (instance != null) {
+                                        try {
+                                            AccessibilityNodeInfo r2 = instance.getRootInActiveWindow();
+                                            if (r2 != null && r2.getPackageName() != null) {
+                                                foregroundPackage = r2.getPackageName().toString();
+                                            }
+                                        } catch (Throwable ignored) { }
+
+                                        if (GSA.equalsIgnoreCase(foregroundPackage)) {
+                                            Log.i(TAG, "Assistant still visible after 2x BACK, sending GLOBAL_ACTION_HOME");
+                                            instance.performGlobalAction(GLOBAL_ACTION_HOME);
+                                        }
+                                    }
+                                }
+                            }, 400);
                         }
                     }
                 }
-            }, 500);
+            }, 400);
         } else {
             dismissedForCurrentSession = true;
             Log.i(TAG, "triggerAutoDismiss skipped: foreground is not Assistant (" + foregroundPackage + ")");
@@ -208,7 +249,6 @@ public class FgTracker extends AccessibilityService {
     }
 
     static boolean canListen() {
-        updateState();
         return !voiceInputActive;
     }
 }
