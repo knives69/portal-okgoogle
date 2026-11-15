@@ -60,11 +60,9 @@ public class WakeService extends Service {
      * and multilingual approximations (e.g. Spanish vosk-model-small-es).
      */
     private static final String[] WAKE = {
-        // Native English
+        // Native English & phonetic variations
         "ok google", "hey google", "okay google", "ok gugel", "hey gugel",
         "ok gogol", "hey gogol",
-        // English model phonetic mappings with Spanish accent
-        "okay with", "okay well", "ok with", "ok well", "hey we will", "okay let me", "ok let me",
         // Multilingual & Spanish model approximations
         "ok web", "ook web", "oque web", "oke web", "oke google", "okey gugel",
         "oye google", "oye gugel", "hola google", "hola gugel"

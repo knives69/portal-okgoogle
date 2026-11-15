@@ -181,7 +181,7 @@ public class MainActivity extends Activity {
         titleRow.addView(titleText);
 
         TextView verChip = new TextView(this);
-        verChip.setText("v1.5.1");
+        verChip.setText("v1.5.2");
         verChip.setTextSize(10);
         verChip.setTypeface(Typeface.DEFAULT_BOLD);
         verChip.setTextColor(colAccentBlue);
