@@ -72,10 +72,9 @@ public class FgTracker extends AccessibilityService {
             return false;
         }
 
-        // Voice dictation, transcription, or Google Assistant surfaces
+        // Voice dictation, transcription, or transient voice search dialogs
         if (c.contains("transcription")
                 || c.contains("intentapi")
-                || c.contains("fragmenthostdefaultactivity")
                 || c.contains("voicesearch")
                 || c.contains("voiceinteraction")
                 || c.contains("speechrecognizer")
