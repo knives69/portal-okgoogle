@@ -209,9 +209,19 @@ public class MainActivity extends Activity {
     private void refresh() {
         String lang = detectModelLanguage();
         boolean running = WakeService.isRunning;
+        boolean healthy = WakeService.isHealthy();
+
+        String stateStr;
+        if (!running) {
+            stateStr = "STOPPED";
+        } else if (healthy) {
+            stateStr = "LISTENING (Active)";
+        } else {
+            stateStr = "DEAF (Recovering stream)";
+        }
 
         status.setText("Acoustic Model: " + lang + "\n" +
-                       "Service State:  " + (running ? "LISTENING" : "STOPPED"));
+                       "Service State:  " + stateStr);
         toggle.setText(running ? "STOP LISTENING" : "START LISTENING");
     }
 }

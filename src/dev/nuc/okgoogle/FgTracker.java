@@ -59,7 +59,7 @@ public class FgTracker extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
-        if (!WakeService.isRunning) {
+        if (!WakeService.isHealthy()) {
             checkAndReviveWakeService();
         }
         int type = event.getEventType();
@@ -81,18 +81,9 @@ public class FgTracker extends AccessibilityService {
         if (instance == null) return;
         SharedPreferences sp = instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         if (!sp.getBoolean(PREF_ENABLED, true)) return;
-        if (!WakeService.isRunning) {
-            Log.i(TAG, "Watchdog (FgTracker): WakeService down, reviving foreground service...");
-            try {
-                Intent si = new Intent(instance, WakeService.class);
-                if (Build.VERSION.SDK_INT >= 26) {
-                    instance.startForegroundService(si);
-                } else {
-                    instance.startService(si);
-                }
-            } catch (Throwable t) {
-                Log.e(TAG, "FgTracker failed to revive WakeService", t);
-            }
+        if (!WakeService.isHealthy()) {
+            Log.i(TAG, "Watchdog (FgTracker): WakeService down or mic deaf, reviving foreground service...");
+            WakeService.restartIfUnhealthy(instance);
         }
     }
 

@@ -38,11 +38,14 @@ public class StartReceiver extends BroadcastReceiver {
                 Log.d(TAG, "Watchdog tick: service disabled by user preference");
                 return;
             }
-            if (WakeService.isRunning) {
-                Log.d(TAG, "Watchdog tick: WakeService running healthy");
+            if (WakeService.isHealthy()) {
+                Log.d(TAG, "Watchdog tick: WakeService running healthy & capturing audio");
                 return;
             }
-            Log.w(TAG, "Watchdog tick: WakeService NOT running! Reviving service...");
+            Log.w(TAG, "Watchdog tick: WakeService NOT healthy (down or mic deaf)! Reviving service...");
+            scheduleWatchdog(context);
+            WakeService.restartIfUnhealthy(context);
+            return;
         } else {
             Log.i(TAG, "Start broadcast received (" + action + "), starting WakeService");
             sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();

@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -51,6 +52,7 @@ public class WakeService extends Service {
     public static final int DEFAULT_VAD_THRESHOLD = 450;
 
     public static volatile boolean isRunning = false;
+    public static volatile long lastAudioChunkTime = 0;
     private static volatile WakeService instance;
 
     /**
@@ -92,6 +94,38 @@ public class WakeService extends Service {
         return instance != null && instance.otherAppRecording;
     }
 
+    public static boolean isHealthy() {
+        if (!isRunning || instance == null) return false;
+        // If mic is intentionally yielded to another app or assistant overlay, consider healthy
+        if (isOtherAppRecording() || !FgTracker.canListen()) return true;
+        if (lastAudioChunkTime == 0) return true; // Initializing grace window
+        return (SystemClock.elapsedRealtime() - lastAudioChunkTime) < 90_000;
+    }
+
+    public static void restartIfUnhealthy(Context ctx) {
+        if (instance != null) {
+            instance.alive = false;
+            if (instance.activeRecord != null) {
+                try {
+                    Log.w(TAG, "Forcing active AudioRecord release to unstick native stream");
+                    instance.activeRecord.release();
+                } catch (Throwable ignored) { }
+                instance.activeRecord = null;
+            }
+        }
+        isRunning = false;
+        try {
+            Intent si = new Intent(ctx, WakeService.class);
+            if (Build.VERSION.SDK_INT >= 26) {
+                ctx.startForegroundService(si);
+            } else {
+                ctx.startService(si);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to restart WakeService", t);
+        }
+    }
+
     @Override public IBinder onBind(Intent i) { return null; }
 
     @Override public void onCreate() {
@@ -114,6 +148,7 @@ public class WakeService extends Service {
         }
         alive = true;
         isRunning = true;
+        lastAudioChunkTime = SystemClock.elapsedRealtime();
         SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
         sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();
         StartReceiver.scheduleWatchdog(this);
@@ -265,6 +300,7 @@ public class WakeService extends Service {
         }
 
         byte[] buf = new byte[3200];
+        int consecutiveAudioFailures = 0;
         while (alive) {
             if (!canCapture()) {
                 sleep(400);
@@ -272,6 +308,10 @@ public class WakeService extends Service {
             }
             AudioRecord rec = openRec();
             if (rec == null) {
+                if (++consecutiveAudioFailures >= 3) {
+                    Log.e(TAG, "AudioRecord failed to initialize 3 consecutive times, stopping for watchdog resurrection");
+                    break;
+                }
                 sleep(600);
                 continue;
             }
@@ -281,7 +321,18 @@ public class WakeService extends Service {
             try { rec.stop(); rec.release(); } catch (Throwable ignored) { }
             activeRecord = null;
 
-            if (heard == null || !alive) continue;
+            if (heard == null || !alive) {
+                if (SystemClock.elapsedRealtime() - lastAudioChunkTime > 90_000) {
+                    if (++consecutiveAudioFailures >= 3) {
+                        Log.e(TAG, "No valid audio received for 3 consecutive capture sessions (>90s), stopping for watchdog resurrection");
+                        break;
+                    }
+                } else {
+                    consecutiveAudioFailures = 0;
+                }
+                continue;
+            }
+            consecutiveAudioFailures = 0;
 
             Log.i(TAG, "Wake word detected: \"" + heard + "\", releasing microphone...");
 
@@ -347,6 +398,11 @@ public class WakeService extends Service {
 
         try {
             while (alive) {
+            if (SystemClock.elapsedRealtime() - lastAudioChunkTime > 90_000) {
+                Log.w(TAG, "Audio stream silent watchdog: >90s without valid chunk, reopening stream");
+                return null;
+            }
+
             int n = rec.read(buf, 0, buf.length);
             if (n <= 0) {
                 if (++stalls > 15) {
@@ -357,6 +413,7 @@ public class WakeService extends Service {
                 continue;
             }
             stalls = 0;
+            lastAudioChunkTime = SystemClock.elapsedRealtime();
 
             if (!canCapture()) {
                 Log.i(TAG, "External voice input or recording detected, yielding mic");
