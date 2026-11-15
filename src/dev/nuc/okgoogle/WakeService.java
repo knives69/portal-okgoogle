@@ -58,21 +58,16 @@ public class WakeService extends Service {
     private static volatile WakeService instance;
 
     /**
-     * Target wake words. Matches native English transcripts, phonetic variations,
-     * and multilingual approximations (e.g. Spanish vosk-model-small-es).
+     * Strict target wake words. Every trigger requires at least 3-4 syllables with "google" or "gugel".
+     * Eliminated all short/conversational false-positive magnets ("ok web", "oye", single words).
      */
     private static final String[] WAKE = {
-        // Native English & phonetic variations
-        "ok google", "hey google", "okay google", "ok gugel", "hey gugel",
-        "ok gogol", "hey gogol",
-        // Multilingual & Spanish model approximations
-        "ok web", "ook web", "oque web", "oke web", "oke google", "okey gugel",
-        "oye google", "oye gugel"
+        "ok google", "hey google", "okay google", "ok gugel", "hey gugel"
     };
 
-    /** Constrains Vosk decoder graph to target keywords + unknown token, slashing CPU by 40-60%. */
+    /** Constrains Vosk decoder graph strictly to target keywords + unknown token, slashing false positives. */
     private static final String GRAMMAR =
-        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"[unk]\"]";
+        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"[unk]\"]";
 
     private volatile boolean alive;
     private Model model;
@@ -485,10 +480,20 @@ public class WakeService extends Service {
             int peakFloor = getPercentile(recentPeak, 15);
             int rmsFloor = getPercentile(recentRms, 15);
 
+            boolean mediaPlaying = false;
+            try {
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (am != null && am.isMusicActive()) {
+                    mediaPlaying = true;
+                }
+            } catch (Throwable ignored) { }
+
             // Dynamic peak trigger threshold:
-            // Voice peak must exceed baseline sensitivity floor AND be at least 1.85x the 15th percentile peak floor (capped at 2000 to prevent deafness in loud noise)
-            int minPeakThreshold = Math.max(1600, vadThreshold * 2);
-            int floorCapped = Math.min(peakFloor, 2000);
+            // When media/video (TikTok, YouTube, Spotify) is playing from Portal speakers, raise baseline from 1600 to 2600
+            // and hysteresis from 2 to 3 blocks to prevent speaker audio spillover from opening false VAD sessions.
+            int baseMin = mediaPlaying ? 2600 : 1600;
+            int minPeakThreshold = Math.max(baseMin, vadThreshold * 2);
+            int floorCapped = Math.min(peakFloor, 2200);
             int dynamicPeakThreshold = Math.max(minPeakThreshold, (int) (floorCapped * 1.85f));
             boolean above = (peak >= dynamicPeakThreshold);
 
@@ -513,14 +518,15 @@ public class WakeService extends Service {
             long nowMs = SystemClock.elapsedRealtime();
             if (nowMs - lastHeartbeatLog > 60_000) {
                 lastHeartbeatLog = nowMs;
-                Log.i(TAG, "Heartbeat (60s): peak=" + peak + " rms=" + rms + " floor=" + floorCapped + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech + " otherRec=" + otherAppRecording + " gen=" + myGen);
+                Log.i(TAG, "Heartbeat (60s): peak=" + peak + " rms=" + rms + " floor=" + floorCapped + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech + " media=" + mediaPlaying + " otherRec=" + otherAppRecording + " gen=" + myGen);
             } else if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
                 lastAmpLog = System.currentTimeMillis();
                 Log.d(TAG, "mic alive, peak=" + peak + " rms=" + rms + " peakFloor=" + peakFloor + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech);
             }
 
-            // Hysteresis: require 2 consecutive blocks (200ms) to open, 10 consecutive blocks (1s) to close
-            if (!inSpeech && aboveRun >= 2) {
+            // Hysteresis: require 3 consecutive blocks (300ms) to open when media is playing, 2 (200ms) when quiet
+            int requiredOpenRuns = mediaPlaying ? 3 : 2;
+            if (!inSpeech && aboveRun >= requiredOpenRuns) {
                 inSpeech = true;
                 // Flush 400ms pre-roll circular buffer chronologically to capture word onset ("O...")
                 for (int k = 0; k < 4; k++) {
