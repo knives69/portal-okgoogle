@@ -279,29 +279,10 @@ public class FgTracker extends AccessibilityService {
                         if (GSA.equalsIgnoreCase(foregroundPackage)) {
                             Log.i(TAG, "Assistant still visible after 1st BACK, sending secondary BACK");
                             instance.performGlobalAction(GLOBAL_ACTION_BACK);
-
-                            mainHandler.postDelayed(new Runnable() {
-                                @Override
-                                public void run() {
-                                    if (instance != null) {
-                                        try {
-                                            AccessibilityNodeInfo r2 = instance.getRootInActiveWindow();
-                                            if (r2 != null && r2.getPackageName() != null) {
-                                                foregroundPackage = r2.getPackageName().toString();
-                                            }
-                                        } catch (Throwable ignored) { }
-
-                                        if (GSA.equalsIgnoreCase(foregroundPackage)) {
-                                            Log.i(TAG, "Assistant still visible after 2x BACK, sending GLOBAL_ACTION_HOME");
-                                            instance.performGlobalAction(GLOBAL_ACTION_HOME);
-                                        }
-                                    }
-                                }
-                            }, 400);
                         }
                     }
                 }
-            }, 400);
+            }, 500);
         } else {
             dismissedForCurrentSession = true;
             Log.i(TAG, "triggerAutoDismiss skipped: foreground is not Assistant (" + foregroundPackage + ")");
