@@ -103,6 +103,15 @@ public class MainActivity extends Activity {
         stopTelemetryLoop();
     }
 
+    @Override
+    protected void onDestroy() {
+        stopTelemetryLoop();
+        if (handler != null) {
+            handler.removeCallbacksAndMessages(null);
+        }
+        super.onDestroy();
+    }
+
     private void loadThemeColors() {
         SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
         themeMode = sp.getInt(PREF_THEME_MODE, 0);
@@ -181,7 +190,7 @@ public class MainActivity extends Activity {
         titleRow.addView(titleText);
 
         TextView verChip = new TextView(this);
-        verChip.setText("v1.5.7");
+        verChip.setText("v1.5.8");
         verChip.setTextSize(10);
         verChip.setTypeface(Typeface.DEFAULT_BOLD);
         verChip.setTextColor(colAccentBlue);

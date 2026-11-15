@@ -180,6 +180,7 @@ public class FgTracker extends AccessibilityService {
         AudioManager am = (AudioManager) instance.getSystemService(Context.AUDIO_SERVICE);
         if (am == null) return false;
 
+        boolean gsaTrackFound = false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 List<AudioPlaybackConfiguration> configs = am.getActivePlaybackConfigurations();
@@ -199,6 +200,7 @@ public class FgTracker extends AccessibilityService {
                                 Object uidObj = getClientUid.invoke(cfg);
                                 Object stateObj = getPlayerState.invoke(cfg);
                                 if (uidObj instanceof Integer && ((Integer) uidObj) == gsaUid) {
+                                    gsaTrackFound = true;
                                     if (stateObj instanceof Integer && ((Integer) stateObj) == 2) {
                                         return true; // GSA actively playing audio
                                     }
@@ -210,6 +212,10 @@ public class FgTracker extends AccessibilityService {
             } catch (Throwable ignored) { }
         }
 
+        // If reflection confirmed GSA has tracks registered and none is in PLAYING state, GSA is not speaking
+        if (gsaTrackFound) return false;
+
+        // Fallback: check isMusicActive() (capped at 4 cycles in triggerAutoDismiss to prevent Spotify hangs)
         return am.isMusicActive();
     }
 
@@ -236,11 +242,11 @@ public class FgTracker extends AccessibilityService {
             }
 
             // Check if Assistant is actively speaking a spoken reply (news, recipe, TTS)
-            if (isAssistantSpeaking() && speechPostponeCount < 8) {
+            if (isAssistantSpeaking() && speechPostponeCount < 4) {
                 speechPostponeCount++;
                 wasSpeaking = true;
                 Log.i(TAG, "triggerAutoDismiss: assistant still speaking (TTS active), postponing 5s (count="
-                        + speechPostponeCount + "/8)");
+                        + speechPostponeCount + "/4)");
                 autoDismissScheduled = true;
                 mainHandler.postDelayed(autoDismissRunnable, 5000);
                 return;
@@ -307,16 +313,21 @@ public class FgTracker extends AccessibilityService {
         String p = pkg.toLowerCase();
         String c = cls != null ? cls.toLowerCase() : "";
 
-        if (!p.equals(GSA)) return false;
-
-        // Transcription or transient voice search dialogs
-        return c.contains("transcription")
-                || c.contains("intentapi")
-                || c.contains("voicesearch")
-                || c.contains("voiceinteraction")
+        // Universal speech recognition or voice search across any app (SmartTube, YouTube, Chrome, etc.)
+        if (c.contains("voicesearch")
                 || c.contains("speechrecognizer")
                 || c.contains("recognizerintent")
-                || c.contains("handsfreeactivity");
+                || c.contains("transcription")
+                || c.contains("voiceinteraction")) {
+            return true;
+        }
+
+        // GSA-specific transient assistant dialogs
+        if (p.equals(GSA)) {
+            return c.contains("intentapi") || c.contains("handsfreeactivity");
+        }
+
+        return false;
     }
 
     static boolean canListen() {

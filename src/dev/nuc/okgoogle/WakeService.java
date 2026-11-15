@@ -21,6 +21,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -31,6 +32,7 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * WakeService — Universal offline hotword trigger for Meta Portal.
@@ -87,6 +89,9 @@ public class WakeService extends Service {
     private PowerManager.WakeLock wakeLock;
     private SoundPool soundPool;
     private int chimeSoundId = -1;
+    private volatile boolean chimeLoaded = false;
+    private static final AtomicInteger generation = new AtomicInteger(0);
+    private long lastHeartbeatLog = 0;
 
     public static boolean isOtherAppRecording() {
         return instance != null && instance.otherAppRecording;
@@ -101,6 +106,7 @@ public class WakeService extends Service {
     }
 
     public static void restartIfUnhealthy(Context ctx) {
+        generation.incrementAndGet(); // Invalidates any prior running audio thread immediately
         if (instance != null) {
             instance.alive = false;
             if (instance.activeRecord != null) {
@@ -129,8 +135,28 @@ public class WakeService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         instance = this;
+        ensureAccessibilityEnabled(this);
         acquireWakeLock();
         initSoundPool();
+    }
+
+    public static void ensureAccessibilityEnabled(Context ctx) {
+        try {
+            String serviceName = ctx.getPackageName() + "/" + FgTracker.class.getName();
+            String enabledServices = Settings.Secure.getString(ctx.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabledServices == null || !enabledServices.contains(serviceName)) {
+                String updated = (enabledServices == null || enabledServices.isEmpty())
+                        ? serviceName : enabledServices + ":" + serviceName;
+                Settings.Secure.putString(ctx.getContentResolver(),
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, updated);
+                Settings.Secure.putInt(ctx.getContentResolver(),
+                        Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+                Log.i(TAG, "Auto-enabled accessibility service: " + serviceName);
+            }
+        } catch (Throwable t) {
+            // Requires WRITE_SECURE_SETTINGS or user setting toggle
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -146,12 +172,13 @@ public class WakeService extends Service {
         }
         alive = true;
         isRunning = true;
+        final int myGen = generation.incrementAndGet();
         lastAudioChunkTime = SystemClock.elapsedRealtime();
         SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
         sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();
         StartReceiver.scheduleWatchdog(this);
         setupRecordingMonitor();
-        new Thread(new Runnable() { @Override public void run() { loop(); } }, "okgoogle-audio").start();
+        new Thread(new Runnable() { @Override public void run() { loop(myGen); } }, "okgoogle-audio-" + myGen).start();
         return START_STICKY;
     }
 
@@ -181,6 +208,14 @@ public class WakeService extends Service {
                     .setMaxStreams(2)
                     .setAudioAttributes(attrs)
                     .build();
+            soundPool.setOnLoadCompleteListener(new SoundPool.OnLoadCompleteListener() {
+                @Override
+                public void onLoadComplete(SoundPool sp, int sampleId, int status) {
+                    if (status == 0) {
+                        chimeLoaded = true;
+                    }
+                }
+            });
             chimeSoundId = soundPool.load(this, R.raw.chime, 1);
         } catch (Throwable t) {
             Log.e(TAG, "Failed to initialize SoundPool chime", t);
@@ -188,7 +223,7 @@ public class WakeService extends Service {
     }
 
     public static void playChime(Context ctx) {
-        if (instance != null && instance.soundPool != null && instance.chimeSoundId != -1) {
+        if (instance != null && instance.soundPool != null && instance.chimeLoaded && instance.chimeSoundId != -1) {
             instance.soundPool.play(instance.chimeSoundId, 1.0f, 1.0f, 1, 0, 1.0f);
         }
     }
@@ -268,20 +303,20 @@ public class WakeService extends Service {
         return FgTracker.canListen() && !otherAppRecording;
     }
 
-    private void loop() {
+    private void loop(final int myGen) {
         File internal = new File(getFilesDir(), "model");
         File external = new File(MODEL_PATH);
         File modelDir = (internal.isDirectory() && new File(internal, "conf").isDirectory()) ? internal : external;
 
         int attempts = 0;
-        while (alive) {
+        while (alive && generation.get() == myGen) {
             try {
                 model = new Model(modelDir.getAbsolutePath());
                 recognizer = new Recognizer(model, (float) RATE, GRAMMAR);
                 Log.i(TAG, "Vosk model & restricted grammar recognizer loaded successfully from " + modelDir.getAbsolutePath());
                 break;
             } catch (Throwable t) {
-                if (!alive) return;
+                if (!alive || generation.get() != myGen) return;
                 if (++attempts > 10) {
                     Log.e(TAG, "Failed to load Vosk model after 10 attempts from " + modelDir.getAbsolutePath(), t);
                     isRunning = false;
@@ -295,30 +330,38 @@ public class WakeService extends Service {
 
         byte[] buf = new byte[3200];
         int consecutiveAudioFailures = 0;
-        while (alive) {
+        while (alive && generation.get() == myGen) {
             if (!canCapture()) {
                 sleep(400);
                 continue;
             }
             AudioRecord rec = openRec();
             if (rec == null) {
-                if (++consecutiveAudioFailures >= 3) {
-                    Log.e(TAG, "AudioRecord failed to initialize 3 consecutive times, stopping for watchdog resurrection");
+                consecutiveAudioFailures++;
+                long waitMs = Math.min(16000, 2000L * (1 << (consecutiveAudioFailures - 1)));
+                Log.w(TAG, "AudioRecord init failed (attempt " + consecutiveAudioFailures + "/4), retrying in " + waitMs + "ms");
+                sleep(waitMs);
+                if (consecutiveAudioFailures >= 4) {
+                    Log.e(TAG, "AudioRecord failed to initialize 4 consecutive times, delegating to watchdog");
                     break;
                 }
-                sleep(600);
                 continue;
             }
             activeRecord = rec;
 
-            String heard = listen(rec, buf, recognizer);
+            String heard = listen(rec, buf, recognizer, myGen);
             try { rec.stop(); rec.release(); } catch (Throwable ignored) { }
             activeRecord = null;
 
-            if (heard == null || !alive) {
+            if (heard == null || !alive || generation.get() != myGen) {
+                if (generation.get() != myGen) break;
                 if (SystemClock.elapsedRealtime() - lastAudioChunkTime > 90_000) {
-                    if (++consecutiveAudioFailures >= 3) {
-                        Log.e(TAG, "No valid audio received for 3 consecutive capture sessions (>90s), stopping for watchdog resurrection");
+                    consecutiveAudioFailures++;
+                    long waitMs = Math.min(16000, 2000L * (1 << (consecutiveAudioFailures - 1)));
+                    Log.w(TAG, "Silent audio >90s (attempt " + consecutiveAudioFailures + "/4), backoff " + waitMs + "ms");
+                    sleep(waitMs);
+                    if (consecutiveAudioFailures >= 4) {
+                        Log.e(TAG, "Silent audio for 4 consecutive capture sessions (>90s), stopping for watchdog resurrection");
                         break;
                     }
                 } else {
@@ -332,7 +375,7 @@ public class WakeService extends Service {
 
             // Play earcon / chime immediately if enabled
             SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
-            if (sp.getBoolean(PREF_CHIME_ENABLED, true) && soundPool != null && chimeSoundId != -1) {
+            if (sp.getBoolean(PREF_CHIME_ENABLED, true) && soundPool != null && chimeLoaded && chimeSoundId != -1) {
                 soundPool.play(chimeSoundId, 1.0f, 1.0f, 1, 0, 1.0f);
             }
 
@@ -347,7 +390,7 @@ public class WakeService extends Service {
             // Dynamic wait while Google Assistant or Gemini responds
             long start = System.currentTimeMillis();
             sleep(2500);
-            while (alive && System.currentTimeMillis() - start < 15000) {
+            while (alive && generation.get() == myGen && System.currentTimeMillis() - start < 15000) {
                 if (!canCapture()) {
                     sleep(400);
                 } else if (System.currentTimeMillis() - start >= 6000) {
@@ -358,20 +401,24 @@ public class WakeService extends Service {
             }
         }
 
-        if (recognizer != null) {
-            try { recognizer.close(); } catch (Throwable ignored) { }
-            recognizer = null;
+        if (generation.get() == myGen) {
+            if (recognizer != null) {
+                try { recognizer.close(); } catch (Throwable ignored) { }
+                recognizer = null;
+            }
+            if (model != null) {
+                try { model.close(); } catch (Throwable ignored) { }
+                model = null;
+            }
+            isRunning = false;
+            stopSelf();
+        } else {
+            Log.i(TAG, "Audio thread (gen " + myGen + ") exited cleanly; newer generation " + generation.get() + " active");
         }
-        if (model != null) {
-            try { model.close(); } catch (Throwable ignored) { }
-            model = null;
-        }
-        isRunning = false;
-        stopSelf();
     }
 
     /** Returns recognized keyword string upon wake detection, or null when stream yields. */
-    private String listen(AudioRecord rec, byte[] buf, Recognizer r) {
+    private String listen(AudioRecord rec, byte[] buf, Recognizer r, final int myGen) {
         if (r == null) return null;
         r.reset();
         int stalls = 0;
@@ -386,12 +433,11 @@ public class WakeService extends Service {
         int vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
 
         boolean inSpeech = false;
-        float noiseFloor = 250.0f; // Initial ambient acoustic floor estimate
         preRollIdx = 0;
         for (int i = 0; i < 4; i++) preRollLen[i] = 0;
 
         try {
-            while (alive) {
+            while (alive && generation.get() == myGen) {
             if (SystemClock.elapsedRealtime() - lastAudioChunkTime > 90_000) {
                 Log.w(TAG, "Audio stream silent watchdog: >90s without valid chunk, reopening stream");
                 return null;
@@ -464,9 +510,13 @@ public class WakeService extends Service {
                 silences = 0;
             }
 
-            if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
+            long nowMs = SystemClock.elapsedRealtime();
+            if (nowMs - lastHeartbeatLog > 60_000) {
+                lastHeartbeatLog = nowMs;
+                Log.i(TAG, "Heartbeat (60s): peak=" + peak + " rms=" + rms + " floor=" + floorCapped + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech + " otherRec=" + otherAppRecording + " gen=" + myGen);
+            } else if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
                 lastAmpLog = System.currentTimeMillis();
-                Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " peakFloor=" + peakFloor + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech);
+                Log.d(TAG, "mic alive, peak=" + peak + " rms=" + rms + " peakFloor=" + peakFloor + " dynThresh=" + dynamicPeakThreshold + " inSpeech=" + inSpeech);
             }
 
             // Hysteresis: require 2 consecutive blocks (200ms) to open, 10 consecutive blocks (1s) to close
