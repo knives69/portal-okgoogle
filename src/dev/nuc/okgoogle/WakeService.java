@@ -46,7 +46,7 @@ public class WakeService extends Service {
     public static final String MODEL_PATH = "/sdcard/Android/data/dev.nuc.okgoogle/files/model";
     public static final String PREF_CHIME_ENABLED = "chime_enabled";
     public static final String PREF_VAD_THRESHOLD = "vad_threshold";
-    public static final int DEFAULT_VAD_THRESHOLD = 600;
+    public static final int DEFAULT_VAD_THRESHOLD = 450;
 
     public static volatile boolean isRunning = false;
     private static volatile WakeService instance;
@@ -295,12 +295,20 @@ public class WakeService extends Service {
         try (Recognizer r = new Recognizer(model, (float) RATE)) {
             int stalls = 0;
             int silences = 0;
+            int loopCount = 0;
             long lastAmpLog = 0;
             long lastVoiceTime = 0;
             String lastPartial = "";
 
             SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
             int vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
+
+            // Pre-roll ring buffer: 2 chunks of 100ms = 200ms pre-speech audio
+            // Prevents clipping the first phoneme ("O...") when transitioning from silence to voice
+            byte[][] preRoll = new byte[2][buf.length];
+            int[] preRollLen = new int[2];
+            int preRollIdx = 0;
+            boolean inSpeech = false;
 
             while (alive) {
                 int n = rec.read(buf, 0, buf.length);
@@ -319,15 +327,25 @@ public class WakeService extends Service {
                     return null;
                 }
 
-                long amp = 0;
-                for (int i = 0; i + 1 < n; i += 2) {
-                    int v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
-                    if (v < 0) v = -v;
-                    if (v > amp) amp = v;
+                // Refresh threshold periodically from preferences
+                if (++loopCount % 10 == 0) {
+                    vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
                 }
 
+                long sumSq = 0;
+                long peak = 0;
+                int samples = n / 2;
+                for (int i = 0; i + 1 < n; i += 2) {
+                    short v = (short) ((buf[i] & 0xff) | (buf[i + 1] << 8));
+                    int abs = (v < 0) ? -v : v;
+                    if (abs > peak) peak = abs;
+                    sumSq += (long) v * v;
+                }
+                int rms = (samples > 0) ? (int) Math.sqrt(sumSq / samples) : 0;
+                long amp = peak;
+
                 // AudioPolicy silence detection: zeroed buffers indicate background muting
-                if (amp == 0) {
+                if (peak == 0) {
                     if (++silences > 12) {
                         Log.w(TAG, "AudioRecord muted by system AudioPolicy, reopening clean stream");
                         return null;
@@ -338,29 +356,61 @@ public class WakeService extends Service {
 
                 if (DEBUG && System.currentTimeMillis() - lastAmpLog > 2500) {
                     lastAmpLog = System.currentTimeMillis();
-                    Log.i(TAG, "mic alive, amp=" + amp);
+                    Log.i(TAG, "mic alive, peak=" + peak + " rms=" + rms + " thresh=" + vadThreshold + " inSpeech=" + inSpeech);
                 }
 
-                boolean hasVoice = (amp >= vadThreshold);
-                if (hasVoice) lastVoiceTime = System.currentTimeMillis();
+                boolean hasVoice = (rms >= vadThreshold);
+                if (hasVoice) {
+                    lastVoiceTime = System.currentTimeMillis();
+                }
+
                 boolean activeSpeech = (System.currentTimeMillis() - lastVoiceTime < 1800);
 
-                if (!r.acceptWaveForm(buf, n)) {
-                    if (activeSpeech) {
+                if (activeSpeech) {
+                    if (!inSpeech) {
+                        // Voice onset: flush pre-roll buffer into recognizer to preserve start of wake word
+                        inSpeech = true;
+                        for (int k = 0; k < 2; k++) {
+                            int idx = (preRollIdx + k) % 2;
+                            if (preRollLen[idx] > 0) {
+                                r.acceptWaveForm(preRoll[idx], preRollLen[idx]);
+                                preRollLen[idx] = 0;
+                            }
+                        }
+                    }
+
+                    if (!r.acceptWaveForm(buf, n)) {
                         String partial = textOf(r.getPartialResult());
                         if (partial != null && !partial.equals(lastPartial)) {
                             lastPartial = partial;
                             if (DEBUG) Log.i(TAG, "partial=\"" + partial + "\" amp=" + amp);
                             if (hasWake(partial)) return partial;
                         }
+                    } else {
+                        String fin = textOf(r.getResult());
+                        if (fin != null && !fin.isEmpty()) {
+                            if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
+                            if (hasWake(fin)) return fin;
+                        }
+                        lastPartial = "";
                     }
                 } else {
-                    String fin = textOf(r.getResult());
-                    if (fin != null && !fin.isEmpty()) {
-                        if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
-                        if (hasWake(fin)) return fin;
+                    if (inSpeech) {
+                        // Speech ended (>1.8s silence): check final buffer and reset recognizer state
+                        inSpeech = false;
+                        String fin = textOf(r.getResult());
+                        if (fin != null && !fin.isEmpty()) {
+                            if (DEBUG) Log.i(TAG, "final=\"" + fin + "\" amp=" + amp);
+                            if (hasWake(fin)) return fin;
+                        }
+                        r.reset();
+                        lastPartial = "";
                     }
-                    lastPartial = "";
+
+                    // Keep pre-roll buffer fresh during silence (Kaldi C++ neural net completely idle)
+                    System.arraycopy(buf, 0, preRoll[preRollIdx], 0, n);
+                    preRollLen[preRollIdx] = n;
+                    preRollIdx = (preRollIdx + 1) % 2;
                 }
             }
         } catch (Throwable t) {
