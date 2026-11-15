@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
         root.setPadding(36, 36, 36, 36);
 
         TextView title = new TextView(this);
-        title.setText("Portal Ok Google v1.1.0");
+        title.setText("Portal Ok Google");
         title.setTextSize(24);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
@@ -71,8 +71,12 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 Intent i = new Intent(MainActivity.this, WakeService.class);
                 if (WakeService.isRunning) {
+                    sp.edit().putBoolean(FgTracker.PREF_ENABLED, false).apply();
+                    StartReceiver.cancelWatchdog(MainActivity.this);
                     stopService(i);
                 } else {
+                    sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();
+                    StartReceiver.scheduleWatchdog(MainActivity.this);
                     if (Build.VERSION.SDK_INT >= 26) {
                         startForegroundService(i);
                     } else {

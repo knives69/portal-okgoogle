@@ -2,7 +2,9 @@ package dev.nuc.okgoogle;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -18,6 +20,7 @@ public class FgTracker extends AccessibilityService {
     private static final String GSA = "com.google.android.googlequicksearchbox";
     public static final String PREFS_NAME = "portal_okgoogle_prefs";
     public static final String PREF_AUTO_DISMISS = "auto_dismiss";
+    public static final String PREF_ENABLED = "service_enabled";
     private static final long AUTO_DISMISS_DELAY_MS = 12000; // 12 seconds idle timeout
 
     static volatile FgTracker instance;
@@ -40,6 +43,7 @@ public class FgTracker extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         Log.i(TAG, "FgTracker accessibility service connected");
+        checkAndReviveWakeService();
     }
 
     @Override
@@ -55,6 +59,9 @@ public class FgTracker extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
+        if (!WakeService.isRunning) {
+            checkAndReviveWakeService();
+        }
         int type = event.getEventType();
         CharSequence pkg = event.getPackageName();
         CharSequence cls = event.getClassName();
@@ -67,6 +74,25 @@ public class FgTracker extends AccessibilityService {
             // User intentionally clicked a button or card: reset the timer
             autoDismissScheduled = false;
             scheduleAutoDismiss();
+        }
+    }
+
+    public static void checkAndReviveWakeService() {
+        if (instance == null) return;
+        SharedPreferences sp = instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (!sp.getBoolean(PREF_ENABLED, true)) return;
+        if (!WakeService.isRunning) {
+            Log.i(TAG, "Watchdog (FgTracker): WakeService down, reviving foreground service...");
+            try {
+                Intent si = new Intent(instance, WakeService.class);
+                if (Build.VERSION.SDK_INT >= 26) {
+                    instance.startForegroundService(si);
+                } else {
+                    instance.startService(si);
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "FgTracker failed to revive WakeService", t);
+            }
         }
     }
 

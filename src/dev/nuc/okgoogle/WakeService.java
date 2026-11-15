@@ -114,6 +114,9 @@ public class WakeService extends Service {
         }
         alive = true;
         isRunning = true;
+        SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
+        sp.edit().putBoolean(FgTracker.PREF_ENABLED, true).apply();
+        StartReceiver.scheduleWatchdog(this);
         setupRecordingMonitor();
         new Thread(new Runnable() { @Override public void run() { loop(); } }, "okgoogle-audio").start();
         return START_STICKY;
