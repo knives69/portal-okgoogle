@@ -26,6 +26,7 @@ import org.json.JSONObject;
 import org.vosk.Model;
 import org.vosk.Recognizer;
 
+import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -64,12 +65,12 @@ public class WakeService extends Service {
         "okay with", "okay well", "ok with", "ok well", "hey we will", "okay let me", "ok let me",
         // Multilingual & Spanish model approximations
         "ok web", "ook web", "oque web", "oke web", "oke google", "okey gugel",
-        "oye google", "oye gugel", "hola google", "hola gugel", "google", "gugel"
+        "oye google", "oye gugel", "hola google", "hola gugel"
     };
 
     /** Constrains Vosk decoder graph to target keywords + unknown token, slashing CPU by 40-60%. */
     private static final String GRAMMAR =
-        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"hola google\", \"google\", \"gugel\", \"[unk]\"]";
+        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"hola google\", \"hola gugel\", \"[unk]\"]";
 
     private volatile boolean alive;
     private Model model;
@@ -236,15 +237,28 @@ public class WakeService extends Service {
     }
 
     private void loop() {
-        try {
-            model = new Model(MODEL_PATH);
-            recognizer = new Recognizer(model, (float) RATE, GRAMMAR);
-            Log.i(TAG, "Vosk model & restricted grammar recognizer loaded successfully from " + MODEL_PATH);
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to load Vosk model or recognizer", t);
-            isRunning = false;
-            stopSelf();
-            return;
+        File internal = new File(getFilesDir(), "model");
+        File external = new File(MODEL_PATH);
+        File modelDir = (internal.isDirectory() && new File(internal, "conf").isDirectory()) ? internal : external;
+
+        int attempts = 0;
+        while (alive) {
+            try {
+                model = new Model(modelDir.getAbsolutePath());
+                recognizer = new Recognizer(model, (float) RATE, GRAMMAR);
+                Log.i(TAG, "Vosk model & restricted grammar recognizer loaded successfully from " + modelDir.getAbsolutePath());
+                break;
+            } catch (Throwable t) {
+                if (!alive) return;
+                if (++attempts > 10) {
+                    Log.e(TAG, "Failed to load Vosk model after 10 attempts from " + modelDir.getAbsolutePath(), t);
+                    isRunning = false;
+                    stopSelf();
+                    return;
+                }
+                Log.w(TAG, "Model/storage not ready yet (attempt " + attempts + "/10): " + t.getMessage() + ", retrying in 1.5s...");
+                sleep(1500);
+            }
         }
 
         byte[] buf = new byte[3200];
@@ -372,9 +386,10 @@ public class WakeService extends Service {
             int rmsFloor = getPercentile(recentRms, 15);
 
             // Dynamic peak trigger threshold:
-            // Voice peak must exceed baseline sensitivity floor AND be at least 1.85x the 15th percentile peak floor
+            // Voice peak must exceed baseline sensitivity floor AND be at least 1.85x the 15th percentile peak floor (capped at 2000 to prevent deafness in loud noise)
             int minPeakThreshold = Math.max(1600, vadThreshold * 2);
-            int dynamicPeakThreshold = Math.max(minPeakThreshold, (int) (peakFloor * 1.85f));
+            int floorCapped = Math.min(peakFloor, 2000);
+            int dynamicPeakThreshold = Math.max(minPeakThreshold, (int) (floorCapped * 1.85f));
             boolean above = (peak >= dynamicPeakThreshold);
 
             if (above) {
