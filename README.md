@@ -88,8 +88,11 @@ Google must be registered as the default voice assistant.
   adb shell settings put secure voice_interaction_service com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService
   ```
 
-### Step 4: CRITICAL — Turn OFF "Hey Google" in Google App
-To avoid the Android 9 / API 31 `ClassNotFoundException` audio crash loop, Google's built-in hotword detection must be turned **OFF** (our service handles wake-word detection instead).
+### Step 4: CRITICAL — Turn OFF "Hey Google" & "While Driving" in Google App
+To avoid the Android 9 / API 31 `ClassNotFoundException` audio crash loop, Google's built-in hotword detection must be turned **OFF** across all settings (our service handles wake-word detection instead).
+
+> [!WARNING]
+> Both **"Hey Google"** and **"While driving"** (or **"Durante la conducción"** in Spanish) MUST be switched **OFF**. If either remains enabled, Google App's background interactor continuously spawns audio recording loops that kill the microphone for all other apps.
 
 - **Via GUI / Direct Intent:**  
   Run this command to open the Voice Match settings page directly:
@@ -97,8 +100,9 @@ To avoid the Android 9 / API 31 `ClassNotFoundException` audio crash loop, Googl
   adb shell am start -a com.google.android.googlequicksearchbox.action.HOTWORD_DETECTION_SETTINGS
   ```
   In the screen that opens:
-  - Toggle **"Hey Google"** to **OFF / DISABLED**.
-  - Under *Other devices / While driving*, ensure all hotword toggles are **OFF**.
+  1. Toggle **"Hey Google"** to **OFF / DISABLED**.
+  2. Under *Other devices / While driving* (or *Otros dispositivos / Durante la conducción*), enter and toggle **"While driving"** to **OFF / DISABLED**.
+  3. Ensure no secondary hotword toggles are active.
 
 ### Step 5: Grant Microphone Permission
 - **Via GUI:**  
@@ -184,7 +188,7 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 
 | Symptom | Cause | Solution |
 |---|---|---|
-| `dead IAudioRecord` spam in logcat | "Hey Google" is enabled in Google App settings | Run `adb shell am start -a com.google.android.googlequicksearchbox.action.HOTWORD_DETECTION_SETTINGS` and turn **OFF** "Hey Google". |
+| `dead IAudioRecord` spam in logcat | "Hey Google" or "While driving" / "Durante la conducción" is enabled in Google App | Run `adb shell am start -a com.google.android.googlequicksearchbox.action.HOTWORD_DETECTION_SETTINGS` and turn **OFF** both "Hey Google" and "While driving" / "Durante la conducción". |
 | Status shows `Model: MISSING` | Acoustic model files not pushed to SD card | Run `./scripts/setup_model.sh` (or `./scripts/setup_model.sh es`). |
 | "Ok Google" not recognized | Accent mismatch or wrong language model | If you speak Spanish, run `./scripts/setup_model.sh es` to install the Spanish phonetic model. |
 | Mic blocked in SmartTube voice search | Accessibility service disabled | Enable Accessibility in Settings or run `adb shell settings put secure enabled_accessibility_services dev.nuc.okgoogle/.FgTracker`. |
