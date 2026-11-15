@@ -21,7 +21,7 @@ public class FgTracker extends AccessibilityService {
     public static final String PREFS_NAME = "portal_okgoogle_prefs";
     public static final String PREF_AUTO_DISMISS = "auto_dismiss";
     public static final String PREF_ENABLED = "service_enabled";
-    private static final long AUTO_DISMISS_DELAY_MS = 12000; // 12 seconds idle timeout
+    private static final long AUTO_DISMISS_DELAY_MS = 15000; // 15 seconds idle timeout (Google Nest Hub standard)
 
     static volatile FgTracker instance;
     static volatile String foregroundPackage = "";
@@ -131,10 +131,6 @@ public class FgTracker extends AccessibilityService {
         SharedPreferences sp = instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         boolean enabled = sp.getBoolean(PREF_AUTO_DISMISS, true);
         if (!enabled) return;
-
-        if (autoDismissScheduled) {
-            return; // Already armed! Do not reset countdown on subtle UI animations
-        }
 
         autoDismissScheduled = true;
         Log.i(TAG, "scheduleAutoDismiss: armed for " + AUTO_DISMISS_DELAY_MS + "ms");

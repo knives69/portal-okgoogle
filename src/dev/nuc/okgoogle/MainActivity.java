@@ -181,7 +181,7 @@ public class MainActivity extends Activity {
         titleRow.addView(titleText);
 
         TextView verChip = new TextView(this);
-        verChip.setText("v1.5.3");
+        verChip.setText("v1.5.4");
         verChip.setTextSize(10);
         verChip.setTypeface(Typeface.DEFAULT_BOLD);
         verChip.setTextColor(colAccentBlue);
@@ -401,9 +401,9 @@ public class MainActivity extends Activity {
 
         addDivider(settingsCard);
 
-        // Switch: Auto-dismiss 12s
+        // Switch: Auto-dismiss 15s
         Switch autoDismissSwitch = new Switch(this);
-        autoDismissSwitch.setText("Smart auto-dismiss (12s)");
+        autoDismissSwitch.setText("Smart auto-dismiss (15s)");
         autoDismissSwitch.setTextSize(14);
         autoDismissSwitch.setTypeface(Typeface.DEFAULT_BOLD);
         autoDismissSwitch.setTextColor(colTextPrimary);
