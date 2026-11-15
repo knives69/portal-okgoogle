@@ -2,8 +2,11 @@ package dev.nuc.okgoogle;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -11,7 +14,10 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
@@ -22,33 +28,41 @@ public class MainActivity extends Activity {
     private TextView status;
     private Button toggle;
     private Button testBtn;
+    private Button testChimeBtn;
+    private CheckBox chimeCheck;
+    private CheckBox autoDismissCheck;
+    private TextView vadLabel;
+    private SeekBar vadSeekBar;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+
+        final SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setPadding(48, 48, 48, 48);
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(36, 36, 36, 36);
 
         TextView title = new TextView(this);
-        title.setText("Portal Ok Google");
-        title.setTextSize(26);
+        title.setText("Portal Ok Google v1.1.0");
+        title.setTextSize(24);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Universal Wake-Word Trigger for Meta Portal");
-        subtitle.setTextSize(14);
+        subtitle.setText("Universal Hands-Free Trigger for Meta Portal");
+        subtitle.setTextSize(13);
         subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, 8, 0, 24);
+        subtitle.setPadding(0, 4, 0, 16);
         root.addView(subtitle);
 
         status = new TextView(this);
-        status.setTextSize(16);
+        status.setTextSize(15);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(0, 16, 0, 24);
+        status.setPadding(0, 8, 0, 16);
         root.addView(status);
 
         toggle = new Button(this);
@@ -75,25 +89,84 @@ public class MainActivity extends Activity {
         });
         root.addView(toggle);
 
+        LinearLayout rowButtons = new LinearLayout(this);
+        rowButtons.setOrientation(LinearLayout.HORIZONTAL);
+        rowButtons.setGravity(Gravity.CENTER);
+        rowButtons.setPadding(0, 12, 0, 16);
+
         testBtn = new Button(this);
-        testBtn.setText("TEST ASSISTANT TRIGGER");
+        testBtn.setText("TEST ASSISTANT");
         testBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 WakeService.launchVoice(MainActivity.this);
             }
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = 24;
-        testBtn.setLayoutParams(lp);
-        root.addView(testBtn);
+        rowButtons.addView(testBtn);
 
-        TextView instructions = new TextView(this);
-        instructions.setText("\nModel directory:\n" + WakeService.MODEL_PATH);
-        instructions.setTextSize(12);
-        instructions.setGravity(Gravity.CENTER);
-        root.addView(instructions);
+        testChimeBtn = new Button(this);
+        testChimeBtn.setText("TEST CHIME");
+        testChimeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                WakeService.playChime(MainActivity.this);
+            }
+        });
+        rowButtons.addView(testChimeBtn);
+        root.addView(rowButtons);
+
+        // Feature Toggles Section
+        LinearLayout settingsCard = new LinearLayout(this);
+        settingsCard.setOrientation(LinearLayout.VERTICAL);
+        settingsCard.setPadding(24, 16, 24, 16);
+        settingsCard.setBackgroundColor(Color.parseColor("#1AFFFFFF"));
+
+        chimeCheck = new CheckBox(this);
+        chimeCheck.setText("Play Google chime sound upon wake-word detection");
+        chimeCheck.setChecked(sp.getBoolean(WakeService.PREF_CHIME_ENABLED, true));
+        chimeCheck.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                sp.edit().putBoolean(WakeService.PREF_CHIME_ENABLED, isChecked).apply();
+            }
+        });
+        settingsCard.addView(chimeCheck);
+
+        autoDismissCheck = new CheckBox(this);
+        autoDismissCheck.setText("Auto-dismiss Assistant overlay after 12s idle (Nest Hub)");
+        autoDismissCheck.setChecked(sp.getBoolean(FgTracker.PREF_AUTO_DISMISS, true));
+        autoDismissCheck.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                sp.edit().putBoolean(FgTracker.PREF_AUTO_DISMISS, isChecked).apply();
+            }
+        });
+        settingsCard.addView(autoDismissCheck);
+
+        vadLabel = new TextView(this);
+        int currentVad = sp.getInt(WakeService.PREF_VAD_THRESHOLD, WakeService.DEFAULT_VAD_THRESHOLD);
+        vadLabel.setText("Voice Sensitivity (VAD Threshold: " + currentVad + ")");
+        vadLabel.setPadding(0, 16, 0, 4);
+        settingsCard.addView(vadLabel);
+
+        vadSeekBar = new SeekBar(this);
+        vadSeekBar.setMax(1200); // 200 to 1400
+        vadSeekBar.setProgress(Math.max(0, currentVad - 200));
+        vadSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int val = progress + 200;
+                vadLabel.setText("Voice Sensitivity (VAD Threshold: " + val + ")");
+                if (fromUser) {
+                    sp.edit().putInt(WakeService.PREF_VAD_THRESHOLD, val).apply();
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        settingsCard.addView(vadSeekBar);
+
+        root.addView(settingsCard);
 
         setContentView(root);
 

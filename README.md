@@ -22,12 +22,13 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 
 - **Offline On-Device Recognition:** Uses a lightweight Vosk acoustic model (`vosk-model-small-en-us-0.15` or `vosk-model-small-es-0.42`) running entirely on-device with zero internet latency or cloud telemetry.
 - **Microphone Collision Prevention:** By keeping Google App's internal "Hey Google" toggle **OFF**, the API 31 crash loop is completely eliminated.
-- **Universal Capture:** Listens across the entire system — home screen, third-party launchers, SmartTube, web browsers, etc.
+- **Universal Capture & 24/7 Reliability:** Listens across the entire system — home screen, third-party launchers, SmartTube, web browsers, etc. Backed by `PARTIAL_WAKE_LOCK` to ensure uninterrupted capture when the display turns off.
+- **Audio Chime (Earcon):** Plays an instant Google Assistant-style rising chime via `SoundPool` the millisecond "Ok Google" is detected.
 - **Dynamic Mic Handover (Zero Conflicts):**
   - **Window Overlay Tracking (`FgTracker`):** An Accessibility Service detects when any app (like SmartTube in-app voice search) opens a transcription dialog and immediately yields the microphone.
   - **Hardware Recording Monitor:** Uses `AudioManager.registerAudioRecordingCallback` to yield whenever any external app opens an audio record track, and automatically reclaims the mic once the recording session ends.
   - **AudioPolicy Silence Recovery:** If the system AudioPolicy silences background audio (`amp == 0`), the capture loop automatically resets cleanly once foreground audio finishes.
-- **Instant Assistant Invocation:** Once a wake word is detected, `WakeService` releases the microphone, allows Qualcomm HAL input to reach standby, and launches `android.intent.action.VOICE_COMMAND` to trigger Google Assistant or Gemini.
+- **Instant Assistant Invocation & Auto-Dismiss:** Once a wake word is detected, `WakeService` releases the microphone, allows Qualcomm HAL input to reach standby, and launches `android.intent.action.VOICE_COMMAND`. After 12 seconds of idle time without user touch, `FgTracker` automatically dismisses the Assistant overlay (Nest Hub behavior).
 
 ---
 
@@ -148,13 +149,26 @@ adb shell am start-foreground-service -n dev.nuc.okgoogle/.WakeService
 
 ---
 
-## In-App Controls
+## In-App Controls & Customization
 
 When you open the **Portal Ok Google** app on your device:
 - **Acoustic Model:** Shows `READY (English US)` or `READY (Spanish)` once model files are detected.
 - **Service State:** Displays `LISTENING` (active) or `STOPPED`.
 - **Toggle Button:** Toggles between `START LISTENING` and `STOP LISTENING`.
 - **TEST ASSISTANT TRIGGER:** Tap this button to immediately dispatch a `VOICE_COMMAND` intent to verify that Google Assistant / Gemini pops up and responds without needing to speak.
+- **TEST CHIME:** Plays the Google Assistant-style confirmation chime on the Portal speakers.
+- **Play chime on wake word:** Toggle audio feedback on/off when "Ok Google" is recognized.
+- **Auto-dismiss Assistant (12s idle):** Toggle automatic dismissal of the Assistant card after 12s of inactivity.
+- **Mic Voice Sensitivity (VAD):** Real-time slider (200 – 1400, default 600) to adjust the minimum acoustic threshold required before feeding audio frames into Vosk, keeping idle CPU minimal.
+
+---
+
+## Resource & CPU Footprint
+
+Designed specifically for embedded smart displays like the Meta Portal+:
+- **RAM Usage:** ~174 MB total PSS (~4.5% of the Portal's 4GB RAM). Native Kaldi neural network graph resides in native heap; Java Heap uses `< 1 MB`.
+- **CPU Idle:** Only ~20–24% of a single core when idle in a quiet room (reduced by >55% via VAD threshold gating).
+- **Log Noise:** All debug amplitude logging is disabled by default for silent, production-ready operation.
 
 ---
 
@@ -207,7 +221,10 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 
 ```
 ├── AndroidManifest.xml          # App manifest, permissions & receivers
-├── res/                         # Strings & accessibility service configuration
+├── res/
+│   ├── raw/chime.wav            # Google Assistant-style confirmation chime
+│   ├── values/strings.xml       # UI string resources
+│   └── xml/accessibility_service_config.xml
 ├── lib/arm64-v8a/               # Precompiled Vosk & JNA shared libraries (arm64)
 ├── libs/                        # vosk-android.jar & jna.jar
 ├── src/dev/nuc/okgoogle/

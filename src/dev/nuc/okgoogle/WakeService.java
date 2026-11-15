@@ -7,15 +7,19 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioRecordingConfiguration;
 import android.media.MediaRecorder;
+import android.media.SoundPool;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 
 import org.json.JSONObject;
@@ -29,21 +33,23 @@ import java.util.Locale;
  * WakeService — Universal offline hotword trigger for Meta Portal.
  *
  * 1. Listens continuously in the background across any app using Vosk.
- * 2. Dynamically yields the microphone if any app opens a speech recognition overlay
- *    or records audio (e.g. SmartTube in-app voice search).
- * 3. Automatically recovers from AudioPolicy background muting (amp == 0 detection).
- * 4. When "Ok Google" is detected: releases the microphone, waits for Qualcomm HAL standby,
- *    and launches Google Assistant (ACTION_VOICE_COMMAND).
+ * 2. 24/7 reliability via PARTIAL_WAKE_LOCK (no sleep when display turns off).
+ * 3. Plays low-latency rising chime upon wake-word detection (Nest Hub earcon).
+ * 4. Yields microphone dynamically during other app recordings (SmartTube, dictation).
+ * 5. Launches Google Assistant / Gemini via ACTION_VOICE_COMMAND.
  */
 public class WakeService extends Service {
     private static final String TAG = "okgoogle";
     private static final boolean DEBUG = false;
     private static final int RATE = 16000;
-    private static final int VOICE_AMP_THRESHOLD = 600;
     private static final String GSA = "com.google.android.googlequicksearchbox";
     public static final String MODEL_PATH = "/sdcard/Android/data/dev.nuc.okgoogle/files/model";
+    public static final String PREF_CHIME_ENABLED = "chime_enabled";
+    public static final String PREF_VAD_THRESHOLD = "vad_threshold";
+    public static final int DEFAULT_VAD_THRESHOLD = 600;
 
     public static volatile boolean isRunning = false;
+    private static volatile WakeService instance;
 
     /**
      * Target wake words. Matches native English transcripts, phonetic variations,
@@ -65,8 +71,22 @@ public class WakeService extends Service {
     private volatile AudioRecord activeRecord;
     private volatile boolean otherAppRecording;
     private AudioManager.AudioRecordingCallback recordingCallback;
+    private PowerManager.WakeLock wakeLock;
+    private SoundPool soundPool;
+    private int chimeSoundId = -1;
+
+    public static boolean isOtherAppRecording() {
+        return instance != null && instance.otherAppRecording;
+    }
 
     @Override public IBinder onBind(Intent i) { return null; }
+
+    @Override public void onCreate() {
+        super.onCreate();
+        instance = this;
+        acquireWakeLock();
+        initSoundPool();
+    }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         try {
@@ -86,6 +106,44 @@ public class WakeService extends Service {
         return START_STICKY;
     }
 
+    private void acquireWakeLock() {
+        if (wakeLock == null) {
+            try {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "portal:okgoogle_wakelock");
+                    wakeLock.setReferenceCounted(false);
+                    wakeLock.acquire();
+                    Log.i(TAG, "PARTIAL_WAKE_LOCK acquired for 24/7 background audio capture");
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to acquire wake lock", t);
+            }
+        }
+    }
+
+    private void initSoundPool() {
+        try {
+            AudioAttributes attrs = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+            soundPool = new SoundPool.Builder()
+                    .setMaxStreams(2)
+                    .setAudioAttributes(attrs)
+                    .build();
+            chimeSoundId = soundPool.load(this, R.raw.chime, 1);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to initialize SoundPool chime", t);
+        }
+    }
+
+    public static void playChime(Context ctx) {
+        if (instance != null && instance.soundPool != null && instance.chimeSoundId != -1) {
+            instance.soundPool.play(instance.chimeSoundId, 1.0f, 1.0f, 1, 0, 1.0f);
+        }
+    }
+
     private void setupRecordingMonitor() {
         if (Build.VERSION.SDK_INT >= 24) {
             final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -98,14 +156,20 @@ public class WakeService extends Service {
                         int mySession = (rec != null) ? rec.getAudioSessionId() : -1;
                         boolean anotherActive = false;
                         for (AudioRecordingConfiguration cfg : configs) {
-                            if (cfg.getClientAudioSessionId() != mySession) {
-                                anotherActive = true;
-                                break;
+                            int sid = cfg.getClientAudioSessionId();
+                            if (mySession != -1 && sid == mySession) {
+                                continue; // Skip our own AudioRecord session
                             }
+                            anotherActive = true;
+                            break;
                         }
                         if (anotherActive != otherAppRecording) {
                             otherAppRecording = anotherActive;
                             Log.i(TAG, "Hardware recording monitor: otherAppRecording=" + otherAppRecording);
+                            if (!otherAppRecording) {
+                                // Recording finished — arm auto-dismiss timer on assistant card
+                                FgTracker.scheduleAutoDismiss();
+                            }
                         }
                     }
                 };
@@ -143,10 +207,12 @@ public class WakeService extends Service {
             r.release();
             return null;
         }
+        activeRecord = r;
         try {
             r.startRecording();
         } catch (Throwable t) {
             Log.e(TAG, "AudioRecord startRecording failed", t);
+            activeRecord = null;
             r.release();
             return null;
         }
@@ -188,9 +254,19 @@ public class WakeService extends Service {
             if (heard == null || !alive) continue;
 
             Log.i(TAG, "Wake word detected: \"" + heard + "\", releasing microphone...");
+
+            // Play earcon / chime immediately if enabled
+            SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            if (sp.getBoolean(PREF_CHIME_ENABLED, true) && soundPool != null && chimeSoundId != -1) {
+                soundPool.play(chimeSoundId, 1.0f, 1.0f, 1, 0, 1.0f);
+            }
+
             // Brief pause allowing Qualcomm HAL to transition input stream to standby
             sleep(250);
             launchVoice(this);
+
+            // Arm auto-dismiss timer on assistant window
+            FgTracker.scheduleAutoDismiss();
 
             // Dynamic wait while Google Assistant or Gemini responds
             long start = System.currentTimeMillis();
@@ -222,6 +298,9 @@ public class WakeService extends Service {
             long lastAmpLog = 0;
             long lastVoiceTime = 0;
             String lastPartial = "";
+
+            SharedPreferences sp = getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            int vadThreshold = sp.getInt(PREF_VAD_THRESHOLD, DEFAULT_VAD_THRESHOLD);
 
             while (alive) {
                 int n = rec.read(buf, 0, buf.length);
@@ -262,7 +341,7 @@ public class WakeService extends Service {
                     Log.i(TAG, "mic alive, amp=" + amp);
                 }
 
-                boolean hasVoice = (amp >= VOICE_AMP_THRESHOLD);
+                boolean hasVoice = (amp >= vadThreshold);
                 if (hasVoice) lastVoiceTime = System.currentTimeMillis();
                 boolean activeSpeech = (System.currentTimeMillis() - lastVoiceTime < 1800);
 
@@ -340,6 +419,17 @@ public class WakeService extends Service {
                 if (am != null) am.unregisterAudioRecordingCallback(recordingCallback);
             } catch (Throwable ignored) {}
         }
+        if (wakeLock != null) {
+            try {
+                if (wakeLock.isHeld()) wakeLock.release();
+            } catch (Throwable ignored) {}
+            wakeLock = null;
+        }
+        if (soundPool != null) {
+            try { soundPool.release(); } catch (Throwable ignored) {}
+            soundPool = null;
+        }
+        instance = null;
         super.onDestroy();
     }
 }
