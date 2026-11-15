@@ -54,14 +54,19 @@ The default English acoustic model listens for:
 
 ## Quick Start / Installation
 
-### 1. Install the English Voice Model
-Run the automated setup script to download the English model and push it to the device over ADB:
+### 1. Install the Voice Model
+Run the automated setup script to download and push the model to the device over ADB.
+By default it installs English, or you can specify Spanish:
 
 ```bash
+# Default (English US):
 ./scripts/setup_model.sh
+
+# Or Spanish:
+./scripts/setup_model.sh es
 ```
 
-*(This downloads `vosk-model-small-en-us-0.15.zip` (~40MB) and installs it to `/sdcard/Android/data/dev.nuc.okgoogle/files/model/`).*
+*(This downloads the acoustic model (~40MB) and installs it to `/sdcard/Android/data/dev.nuc.okgoogle/files/model/`).*
 
 ### 2. Build and Install the APK
 Build the APK from source:
@@ -82,8 +87,8 @@ adb shell pm grant dev.nuc.okgoogle android.permission.RECORD_AUDIO
 adb shell settings put secure enabled_accessibility_services dev.nuc.okgoogle/.FgTracker
 adb shell settings put secure accessibility_enabled 1
 
-# Start the wake service
-adb shell am broadcast -a dev.nuc.okgoogle.START
+# Start the wake service directly
+adb shell am start-foreground-service -n dev.nuc.okgoogle/.WakeService
 ```
 
 ---
@@ -129,11 +134,11 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 
 - **Start Listening:**
   ```bash
-  adb shell am broadcast -a dev.nuc.okgoogle.START
+  adb shell am start-foreground-service -n dev.nuc.okgoogle/.WakeService
   ```
 - **Stop Listening:**
   ```bash
-  adb shell am broadcast -a dev.nuc.okgoogle.STOP
+  adb shell am stopservice -n dev.nuc.okgoogle/.WakeService
   ```
 - **View Live Logs:**
   ```bash

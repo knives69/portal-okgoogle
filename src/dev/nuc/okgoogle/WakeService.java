@@ -41,14 +41,19 @@ public class WakeService extends Service {
     private static final String GSA = "com.google.android.googlequicksearchbox";
     public static final String MODEL_PATH = "/sdcard/Android/data/dev.nuc.okgoogle/files/model";
 
+    public static volatile boolean isRunning = false;
+
     /**
-     * Target wake words. Matches native English transcripts as well as common
-     * phonetic approximations produced by multilingual models (e.g. Spanish vosk-model-small-es).
+     * Target wake words. Matches native English transcripts, phonetic variations,
+     * and multilingual approximations (e.g. Spanish vosk-model-small-es).
      */
     private static final String[] WAKE = {
         // Native English
         "ok google", "hey google", "okay google", "ok gugel", "hey gugel",
-        // Multilingual & phonetic approximations
+        "ok gogol", "hey gogol",
+        // English model phonetic mappings with Spanish accent
+        "okay with", "okay well", "ok with", "ok well", "hey we will", "okay let me", "ok let me",
+        // Multilingual & Spanish model approximations
         "ok web", "ook web", "oque web", "oke web", "oke google", "okey gugel",
         "oye google", "oye gugel", "hola google", "hola gugel", "google", "gugel"
     };
@@ -68,8 +73,12 @@ public class WakeService extends Service {
         } catch (Throwable t) {
             Log.e(TAG, "startForeground failed", t);
         }
-        if (alive) return START_STICKY;
+        if (alive) {
+            isRunning = true;
+            return START_STICKY;
+        }
         alive = true;
+        isRunning = true;
         setupRecordingMonitor();
         new Thread(new Runnable() { @Override public void run() { loop(); } }, "okgoogle-audio").start();
         return START_STICKY;
@@ -152,6 +161,7 @@ public class WakeService extends Service {
             Log.i(TAG, "Vosk model loaded successfully from " + MODEL_PATH);
         } catch (Throwable t) {
             Log.e(TAG, "Failed to load Vosk model", t);
+            isRunning = false;
             stopSelf();
             return;
         }
@@ -178,7 +188,7 @@ public class WakeService extends Service {
             Log.i(TAG, "Wake word detected: \"" + heard + "\", releasing microphone...");
             // Brief pause allowing Qualcomm HAL to transition input stream to standby
             sleep(250);
-            launchVoice();
+            launchVoice(this);
 
             // Dynamic wait while Google Assistant or Gemini responds
             long start = System.currentTimeMillis();
@@ -198,6 +208,7 @@ public class WakeService extends Service {
             try { model.close(); } catch (Throwable ignored) { }
             model = null;
         }
+        isRunning = false;
         stopSelf();
     }
 
@@ -295,13 +306,13 @@ public class WakeService extends Service {
         return null;
     }
 
-    private void launchVoice() {
+    public static void launchVoice(Context ctx) {
         try {
             Intent i = new Intent(Intent.ACTION_VOICE_COMMAND);
             i.setPackage(GSA);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             Log.i(TAG, "Launching VOICE_COMMAND to Google Assistant");
-            startActivity(i);
+            ctx.startActivity(i);
         } catch (Throwable t) {
             Log.e(TAG, "Failed to launch VOICE_COMMAND", t);
         }
@@ -313,6 +324,7 @@ public class WakeService extends Service {
 
     @Override public void onDestroy() {
         alive = false;
+        isRunning = false;
         if (Build.VERSION.SDK_INT >= 24 && recordingCallback != null) {
             try {
                 AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
