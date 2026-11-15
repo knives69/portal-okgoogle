@@ -2,9 +2,28 @@
 
 **Universal Offline Wake-Word Trigger for Meta Portal / Portal+ (Android 9 / API 28)**
 
-An open-source, background hotword service enabling hands-free **"Ok Google"** and **"Hey Google"** activation on rooted Meta Portal devices running Android 9 (e.g. via [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal)).
+[![Release](https://img.shields.io/github/v/release/knives69/portal-okgoogle?style=flat-square)](https://github.com/knives69/portal-okgoogle/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Android%209%20(API%2028)-green.svg?style=flat-square)](https://android.com)
 
-Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with dynamic audio session arbitration and seamless microphone handover.
+An open-source, 24/7 background hotword service enabling hands-free **"Ok Google"** and **"Hey Google"** activation on rooted Meta Portal devices running Android 9 (such as via [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal)).
+
+Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with dynamic audio session arbitration, acoustic echo suppression, and seamless microphone handover.
+
+---
+
+## Key Features in v1.6.0
+
+- **100% Offline & Private:** Runs entirely on-device with Vosk Kaldi acoustic models (`vosk-model-small-en-us-0.15` or `vosk-model-small-es-0.42`). Zero cloud latency, zero audio telemetry.
+- **Strict 4-Syllable Hotword Detection:** Constrained grammar lattice eliminating all conversational false positives.
+- **Adaptive Media Playback Suppression:** Dynamically elevates acoustic thresholds and hysteresis when media (TikTok, YouTube, Spotify) is playing through the Portal's own speakers, preventing speaker spillover from triggering false activations while still allowing close-range voice commands.
+- **Smart 15-Second Auto-Dismiss (Google Nest Hub Standard):** Automatically dismisses the Assistant overlay after 15 seconds of inactivity. Includes intelligent TTS reading window extension (postpones dismissal while Assistant speaks long news or recipes, then grants a full 15-second window to read suggestions).
+- **Pure BACK Dismissal (No Recents Trigger):** Dismisses Assistant using a clean two-stage `GLOBAL_ACTION_BACK` sequence without injecting `HOME` events that could inadvertently open the Android task switcher.
+- **Universal Voice Dictation Handover:** Yields the microphone immediately when any application (e.g., SmartTube, YouTube, browser) opens an in-app speech dictation or voice search dialog.
+- **Dual-Tier Resilient Watchdog:** Instant foreground service revival via Accessibility Service lifecycle (`FgTracker`) backed by a 15-minute `AlarmManager` repeating watchdog.
+- **Thread Generation Guard:** Employs atomic generation counters (`AtomicInteger generation`) preventing older audio threads from closing shared Vosk pointers or killing newly revived services.
+- **Auto-Enabling Accessibility Service:** Uses `WRITE_SECURE_SETTINGS` to automatically register and maintain the `FgTracker` service across app updates.
+- **Material 3 UI Dashboard:** Modern dashboard with Light, Dark, and Follow System theme modes, real-time audio telemetry, and full English localization.
 
 ---
 
@@ -20,31 +39,32 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 
 ## How This Solution Works
 
-- **Offline On-Device Recognition:** Uses a lightweight Vosk acoustic model (`vosk-model-small-en-us-0.15` or `vosk-model-small-es-0.42`) running entirely on-device with zero internet latency or cloud telemetry.
 - **Microphone Collision Prevention:** By keeping Google App's internal "Hey Google" toggle **OFF**, the API 31 crash loop is completely eliminated.
-- **Universal Capture & 24/7 Reliability:** Listens across the entire system — home screen, third-party launchers, SmartTube, web browsers, etc. Backed by `PARTIAL_WAKE_LOCK` to ensure uninterrupted capture when the display turns off.
-- **Audio Chime (Earcon):** Plays an instant Google Assistant-style rising chime via `SoundPool` the millisecond "Ok Google" is detected.
-- **Dynamic Mic Handover (Zero Conflicts):**
-  - **Window Overlay Tracking (`FgTracker`):** An Accessibility Service detects when any app (like SmartTube in-app voice search) opens a transcription dialog and immediately yields the microphone.
-  - **Hardware Recording Monitor:** Uses `AudioManager.registerAudioRecordingCallback` to yield whenever any external app opens an audio record track, and automatically reclaims the mic once the recording session ends.
-  - **AudioPolicy Silence Recovery:** If the system AudioPolicy silences background audio (`amp == 0`), the capture loop automatically resets cleanly once foreground audio finishes.
-- **Instant Assistant Invocation & Auto-Dismiss:** Once a wake word is detected, `WakeService` releases the microphone, allows Qualcomm HAL input to reach standby, and launches `android.intent.action.VOICE_COMMAND`. After 12 seconds of idle time without user touch, `FgTracker` automatically dismisses the Assistant overlay (Nest Hub behavior).
+- **Universal Capture & 24/7 Reliability:** Listens across the entire system — home screen, third-party launchers, video apps, browsers, etc. Backed by `PARTIAL_WAKE_LOCK` to ensure uninterrupted capture when the display turns off.
+- **Audio Chime (Earcon):** Plays an instant Google Assistant-style rising chime via `SoundPool` the millisecond a wake word is recognized.
+- **Multi-App Arbitration:**
+  - **Window Overlay Tracking (`FgTracker`):** Accessibility Service detects speech search classes (`voicesearch`, `transcription`, `speechrecognizer`) across any app and yields the mic instantly.
+  - **Hardware Recording Monitor:** Uses `AudioManager.registerAudioRecordingCallback` to yield whenever an external app opens a recording track, automatically reclaiming the mic once the recording session ends.
+  - **AudioPolicy Silence Recovery:** If the system AudioPolicy silences background audio (`peak == 0`), the capture loop automatically resets cleanly once foreground audio finishes.
+- **Local AudioRecord Backoff:** 4-stage exponential retry backoff (2s, 4s, 8s, 16s = 30s) allows temporary hardware audio conflicts (e.g. video calls, camera capture) to recover without crashing the service.
+- **60-Second Telemetry Heartbeat:** Periodically outputs diagnostic state (`peak`, `rms`, `floor`, `dynThresh`, `inSpeech`, `media`, `gen`) to logcat without log spam.
 
 ---
 
 ## Supported Wake Words
 
-### English Acoustic Model (Default)
-- `"ok google"`
-- `"hey google"`
-- `"okay google"`
-- Phonetic variants: `"ok gugel"`, `"hey gugel"`, `"ok gogol"`
-- Accented English matches: `"okay with"`, `"okay well"`, `"hey we will"`, `"okay let me"`
+Recognition is restricted to high-confidence 4-syllable phrases to guarantee zero false positives from background TV, conversation, or social video feeds:
 
-### Spanish Acoustic Model (`es`)
-- `"ok google"`, `"hey google"`
-- Phonetic matches: `"ok web"`, `"ook web"`, `"oke google"`, `"okey gugel"`
-- Spanish phrases: `"oye google"`, `"oye gugel"`, `"hola google"`, `"google"`
+| Wake Word | Syllables | Phonetic Target |
+|---|---|---|
+| `"ok google"` | 4 | `[oʊ-keɪ-ɡuː-ɡəl]` |
+| `"hey google"` | 3-4 | `[heɪ-ɡuː-ɡəl]` |
+| `"okay google"` | 4 | `[oʊ-keɪ-ɡuː-ɡəl]` |
+| `"ok gugel"` | 4 | Phonetic Spanish/Multilingual approximation |
+| `"hey gugel"` | 3-4 | Phonetic Spanish/Multilingual approximation |
+
+> [!NOTE]
+> All conversational phrases and loose 2-syllable triggers (`"ok web"`, `"oye google"`, `"hola google"`, single-word `"google"`) have been completely purged from the grammar and wake tables to eliminate false positives in videos and movies.
 
 ---
 
@@ -53,9 +73,9 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 1. **Meta Portal / Portal+** rooted and running Android 9 (Aloha/OpenPortal) with Google Play Services installed.
 2. **Google App (GSA):**
    - **Package:** `com.google.android.googlequicksearchbox`
-   - **Tested / Verified Version:** **`17.6.59.ve.arm64`** (Version code: `301698282`, minSdk 28, targetSdk 36, `arm64-v8a`).
-   - *(Note: Regarding [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal), we are using a different and newer version of Google App than older setups. Older builds such as GSA 14.14 prematurely terminate voice intents in `HandsFreeActivity`. GSA `17.6.59.ve.arm64` or modern Play Store builds are required for stable assistant activation).*
-   - You can verify your installed version with:
+   - **Verified Working Build:** **`17.6.59.ve.arm64`** (Version code: `301698282`, minSdk 28, targetSdk 36, `arm64-v8a`).
+   - *(Note: Regarding [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal), newer GSA builds such as `17.6.59.ve.arm64` or modern Play Store releases are required. Older builds like GSA 14.14 prematurely terminate voice intents in `HandsFreeActivity`).*
+   - Verify your installed version with:
      ```bash
      adb shell dumpsys package com.google.android.googlequicksearchbox | grep versionName
      ```
@@ -65,7 +85,7 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 
 ## Complete Setup Guide (Step-by-Step)
 
-Follow these steps to configure your Portal and start hands-free listening. You can perform them via the device GUI or using the copy-paste ADB commands.
+Follow these steps to configure your Portal and start hands-free listening.
 
 ### Step 1: Install the Voice Model on Device
 Run the included setup script from your computer to download and push the acoustic model to `/sdcard/Android/data/dev.nuc.okgoogle/files/model/`:
@@ -79,7 +99,7 @@ Run the included setup script from your computer to download and push the acoust
 ```
 
 ### Step 2: Install the APK
-Download the pre-compiled [okgoogle.apk](https://github.com/knives69/portal-okgoogle/releases/latest) from Releases, or build it yourself (see [Building from Source](#building-from-source)):
+Download the latest [okgoogle.apk](https://github.com/knives69/portal-okgoogle/releases/latest) from Releases, or build from source (see [Building from Source](#building-from-source)):
 
 ```bash
 adb install -r okgoogle.apk
@@ -100,35 +120,31 @@ Google must be registered as the default voice assistant.
 To avoid the Android 9 / API 31 `ClassNotFoundException` audio crash loop while keeping the voice assistant gateway active:
 
 > [!WARNING]
-> - **Incompatible Mic Grabbers (`Alexa` / `com.millenium`):** Neither **Amazon Alexa** (`com.amazon.alexa.multimodal.falcon`) nor **`com.millenium`** can remain installed or active. Both capture and hold persistent audio recording sessions in the background, stealing the microphone from our service. Disable or uninstall them with:
+> - **Incompatible Background Mic Grabbers:** Neither **Amazon Alexa** (`com.amazon.alexa.multimodal.falcon`) nor **`com.millenium`** can remain active. Both capture and hold persistent audio recording sessions in the background. Disable them with:
 >   ```bash
 >   adb shell pm disable-user --user 0 com.amazon.alexa.multimodal.falcon
 >   adb shell pm disable-user --user 0 com.millenium
 >   ```
-> - **Google App Version vs OpenPortal:** Regarding [CoderPlusPlus/OpenPortal](https://github.com/CoderPlusPlus/OpenPortal), we are using a different and newer verified Google App build (**`17.6.59.ve.arm64`**). Older builds bundle voice interaction stubs that close prematurely.
 > - **"Hey Google"** MUST be turned **OFF** in Google App settings (prevents the background `dead IAudioRecord` crash loop).
 > - **"While driving"** (or **"Durante la conducción"** in Spanish) MUST be turned **ON** (maintains the voice command gateway ready for assistant invocation).
 
 - **Via GUI / Direct Intent:**  
-  Run this command to open the Voice Match settings page directly:
+  Open the Voice Match settings page directly:
   ```bash
   adb shell am start -a com.google.android.googlequicksearchbox.action.HOTWORD_DETECTION_SETTINGS
   ```
-  In the screen that opens:
   1. Toggle **"Hey Google"** to **OFF / DISABLED**.
-  2. Under *Other devices / While driving* (or *Otros dispositivos / Durante la conducción*), enter and toggle **"While driving"** to **ON / ENABLED**.
+  2. Under *Other devices / While driving* (or *Otros dispositivos / Durante la conducción*), toggle **"While driving"** to **ON / ENABLED**.
 
-### Step 5: Grant Microphone Permission
-- **Via GUI:**  
-  Open the **Portal Ok Google** app and tap **Allow** when prompted for microphone access.
-- **Via ADB:**  
-  ```bash
-  adb shell pm grant dev.nuc.okgoogle android.permission.RECORD_AUDIO
-  ```
+### Step 5: Grant Permissions & Enable Auto-Management
+Grant audio capture and secure settings permissions via ADB so the service can auto-manage its accessibility helper:
 
-### Step 6: Enable Accessibility Service (Microphone Handover)
-This allows the app to detect when another app (like SmartTube voice search) opens a voice input overlay and yield the mic.
+```bash
+adb shell pm grant dev.nuc.okgoogle android.permission.RECORD_AUDIO
+adb shell pm grant dev.nuc.okgoogle android.permission.WRITE_SECURE_SETTINGS
+```
 
+### Step 6: Enable Accessibility Service (Microphone Handover & Auto-Dismiss)
 - **Via GUI:**  
   Go to **Settings → Accessibility → Portal Ok Google** and toggle it **ON**.
 - **Via ADB:**  
@@ -138,7 +154,7 @@ This allows the app to detect when another app (like SmartTube voice search) ope
   ```
 
 ### Step 7: Whitelist from Battery Optimization (Doze)
-Ensures Android does not kill the background service when the screen is idle:
+Ensures Android does not throttle or kill the background capture loop:
 
 ```bash
 adb shell dumpsys deviceidle whitelist +dev.nuc.okgoogle
@@ -157,26 +173,27 @@ adb shell am start-foreground-service -n dev.nuc.okgoogle/.WakeService
 
 ## In-App Controls & Customization
 
-When you open the **Portal Ok Google** app on your device:
-- **Acoustic Model:** Shows `READY (English US)` or `READY (Spanish)` once model files are detected.
-- **Service State:** Displays `LISTENING` (active) or `STOPPED`.
-- **Toggle Button:** Toggles between `START LISTENING` and `STOP LISTENING`.
-- **TEST ASSISTANT TRIGGER:** Tap this button to immediately dispatch a `VOICE_COMMAND` intent to verify that Google Assistant / Gemini pops up and responds without needing to speak.
-- **TEST CHIME:** Plays the Google Assistant-style confirmation chime on the Portal speakers.
-- **Play chime on wake word:** Toggle audio feedback on/off when "Ok Google" is recognized.
-- **Auto-dismiss Assistant (12s idle):** Toggle automatic dismissal of the Assistant card after 12s of inactivity.
-- **Mic Voice Sensitivity Floor:** Real-time slider (200 – 1400, default 450) to calibrate the baseline quiet-room sensitivity floor. In noisy environments (TV, air conditioning, refrigerator), an **asymmetric noise-floor follower** dynamically raises the trigger threshold (+7 dB above ambient background noise), ensuring the Kaldi neural net sleeps even with background sounds.
+The dashboard (Material 3) includes:
+- **Service Status Chip:** Displays live status (`LISTENING` or `STOPPED`) and app version (`v1.6.0`).
+- **Acoustic Model Language:** Shows `READY (English US)` or `READY (Spanish)` once model files are validated.
+- **Start / Stop Button:** Starts or stops background listening.
+- **Theme Selector:** Toggle between **Light**, **Dark**, and **Follow System** (auto-adapts UI contrast).
+- **TEST ASSISTANT TRIGGER:** Dispatches a `VOICE_COMMAND` intent to verify Assistant pops up without needing to speak.
+- **TEST CHIME:** Plays the confirmation chime on Portal speakers.
+- **Play chime on wake word:** Toggle audio feedback on/off when wake words are detected.
+- **Auto-dismiss Assistant (15s idle):** Toggle automatic dismissal of the Assistant card after 15 seconds of inactivity.
+- **Mic Voice Sensitivity Floor:** Real-time slider (200 – 1400, default 450) to calibrate quiet-room sensitivity. In noisy environments, the rolling noise-floor tracker automatically adapts the trigger threshold (+7 dB above background ambient sound).
 
 ---
 
 ## Resource & CPU Footprint
 
-Designed specifically for embedded smart displays like the Meta Portal+:
-- **RAM Usage:** **~128 MB total PSS** (reduced from 181 MB). Memory remains perfectly flat over days of continuous uptime thanks to static JNI `Recognizer` reuse and pre-allocated circular audio buffers.
-- **CPU Idle (Quiet Room):** **~1.7% of a single core** (~0.2% total SoC load). During silence, the Kaldi neural network is completely bypassed.
-- **CPU Idle (Noisy Room with TV/AC):** **~2–5% of a single core**. The 15th-percentile rolling noise floor tracker prevents background television or fan noise from waking the acoustic model.
-- **Decoding Speed & Accuracy:** Constrained grammar lattice (`GRAMMAR` with `[unk]`) restricts Kaldi search space to wake words, cutting active decoding CPU by 50% and eliminating false-positive word gibberish.
-- **Log Noise:** All debug logging is disabled by default for silent, zero-overhead operation.
+Tested and benchmarked on Meta Portal+ hardware (Snapdragon 660 / Aloha):
+- **RAM Usage:** **~125 MB total PSS** (flat memory footprint; static JNI `Recognizer` reuse and zero buffer churn).
+- **CPU Idle (Quiet Room):** **~1.5% of a single core** (~0.2% total SoC load). During silence, the Kaldi neural net sleeps.
+- **CPU Idle (Noisy Room with TV/AC):** **~2–4% of a single core**. The rolling noise-floor follower prevents background television or fan noise from waking the acoustic model.
+- **Speaker Playback Immunity:** When video/audio is active (`media=true`), the threshold automatically raises to 2600 and opening hysteresis requires 300ms, completely ignoring video dialogue while keeping voice commands responsive.
+- **Heartbeat Telemetry:** 1 log line per minute (`Heartbeat (60s)`) ensures live health observability without logcat spam.
 
 ---
 
@@ -188,7 +205,11 @@ Designed specifically for embedded smart displays like the Meta Portal+:
   ```
 - **Stop Listening:**
   ```bash
-  adb shell am stopservice -n dev.nuc.okgoogle/.WakeService
+  adb shell am broadcast -a dev.nuc.okgoogle.STOP -p dev.nuc.okgoogle
+  ```
+- **Simulate Watchdog Tick:**
+  ```bash
+  adb shell am broadcast -a dev.nuc.okgoogle.WATCHDOG -p dev.nuc.okgoogle
   ```
 - **View Live Logs:**
   ```bash
@@ -222,7 +243,8 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 | Status shows `Model: MISSING` | Acoustic model files not pushed to SD card | Run `./scripts/setup_model.sh` (or `./scripts/setup_model.sh es`). |
 | "Ok Google" not recognized | Accent mismatch or wrong language model | If you speak Spanish, run `./scripts/setup_model.sh es` to install the Spanish phonetic model. |
 | Mic blocked in SmartTube voice search | Accessibility service disabled | Enable Accessibility in Settings or run `adb shell settings put secure enabled_accessibility_services dev.nuc.okgoogle/.FgTracker`. |
-| Assistant triggers once, then stops | Background execution limit | Ensure the service is started with `am start-foreground-service -n dev.nuc.okgoogle/.WakeService`. |
+| Assistant card does not close after 15s | Accessibility service not running or permission missing | Grant secure settings via `adb shell pm grant dev.nuc.okgoogle android.permission.WRITE_SECURE_SETTINGS` and restart the service. |
+| Assistant triggers repeatedly while watching videos | Outdated app version with loose grammar | Upgrade to `v1.6.0+` which includes adaptive media suppression and strict 4-syllable hotwords. |
 
 ---
 
@@ -231,16 +253,17 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 ```
 ├── AndroidManifest.xml          # App manifest, permissions & receivers
 ├── res/
+│   ├── mipmap-*/                # App launcher icons (Gemini star + studio mic)
 │   ├── raw/chime.wav            # Google Assistant-style confirmation chime
-│   ├── values/strings.xml       # UI string resources
-│   └── xml/accessibility_service_config.xml
+│   ├── values/strings.xml       # UI string resources (English localization)
+│   └── xml/a11y.xml             # Accessibility service configuration
 ├── lib/arm64-v8a/               # Precompiled Vosk & JNA shared libraries (arm64)
 ├── libs/                        # vosk-android.jar & jna.jar
 ├── src/dev/nuc/okgoogle/
-│   ├── MainActivity.java        # UI to inspect model status, test trigger, and toggle service
-│   ├── WakeService.java         # Background Vosk engine, silence recovery & voice intent
-│   ├── FgTracker.java           # Accessibility service for active window arbitration
-│   └── StartReceiver.java       # Boot receiver (START/STOP)
+│   ├── MainActivity.java        # Material 3 UI dashboard (Day/Night, telemetry & controls)
+│   ├── WakeService.java         # Background Vosk engine, generation guards & voice intent
+│   ├── FgTracker.java           # Accessibility service, window arbitration & 15s auto-dismiss
+│   └── StartReceiver.java       # Boot receiver, watchdog timer & START/STOP intents
 ├── scripts/
 │   ├── build.sh                 # Standalone APK compilation & signing script
 │   └── setup_model.sh           # Automated Vosk acoustic model installer (en/es)
