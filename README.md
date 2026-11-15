@@ -54,7 +54,7 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 2. **Google App (GSA):**
    - **Package:** `com.google.android.googlequicksearchbox`
    - **Tested / Verified Version:** **`17.6.59.ve.arm64`** (Version code: `301698282`, minSdk 28, targetSdk 36, `arm64-v8a`).
-   - *(Note: Older builds such as GSA 14.14 prematurely terminate voice intents in `HandsFreeActivity`. GSA `17.6.59.ve.arm64` or modern Play Store builds are required for stable assistant activation).*
+   - *(Note: Regarding [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal), we are using a different and newer version of Google App than older setups. Older builds such as GSA 14.14 prematurely terminate voice intents in `HandsFreeActivity`. GSA `17.6.59.ve.arm64` or modern Play Store builds are required for stable assistant activation).*
    - You can verify your installed version with:
      ```bash
      adb shell dumpsys package com.google.android.googlequicksearchbox | grep versionName
@@ -99,8 +99,14 @@ Google must be registered as the default voice assistant.
 ### Step 4: Configure Hotword Settings in Google App
 To avoid the Android 9 / API 31 `ClassNotFoundException` audio crash loop while keeping the voice assistant gateway active:
 
-> [!IMPORTANT]
-> - **"Hey Google"** MUST be turned **OFF** (prevents the background `dead IAudioRecord` crash loop).
+> [!WARNING]
+> - **Incompatible Mic Grabbers (`Alexa` / `com.millenium`):** Neither **Amazon Alexa** (`com.amazon.alexa.multimodal.falcon`) nor **`com.millenium`** can remain installed or active. Both capture and hold persistent audio recording sessions in the background, stealing the microphone from our service. Disable or uninstall them with:
+>   ```bash
+>   adb shell pm disable-user --user 0 com.amazon.alexa.multimodal.falcon
+>   adb shell pm disable-user --user 0 com.millenium
+>   ```
+> - **Google App Version vs OpenPortal:** Regarding [CoderPlusPlus/OpenPortal](https://github.com/CoderPlusPlus/OpenPortal), we are using a different and newer verified Google App build (**`17.6.59.ve.arm64`**). Older builds bundle voice interaction stubs that close prematurely.
+> - **"Hey Google"** MUST be turned **OFF** in Google App settings (prevents the background `dead IAudioRecord` crash loop).
 > - **"While driving"** (or **"Durante la conducción"** in Spanish) MUST be turned **ON** (maintains the voice command gateway ready for assistant invocation).
 
 - **Via GUI / Direct Intent:**  
@@ -210,6 +216,7 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 | Symptom | Cause | Solution |
 |---|---|---|
 | `dead IAudioRecord` spam in logcat | "Hey Google" is enabled in Google App settings | Run `adb shell am start -a com.google.android.googlequicksearchbox.action.HOTWORD_DETECTION_SETTINGS` and turn **OFF** "Hey Google" (keep "While driving" / "Durante la conducción" ON). |
+| Service yields mic immediately / `otherAppRecording=true` | Alexa or `com.millenium` holding the mic | Disable them via `adb shell pm disable-user --user 0 com.amazon.alexa.multimodal.falcon` and `adb shell pm disable-user --user 0 com.millenium`. |
 | Status shows `Model: MISSING` | Acoustic model files not pushed to SD card | Run `./scripts/setup_model.sh` (or `./scripts/setup_model.sh es`). |
 | "Ok Google" not recognized | Accent mismatch or wrong language model | If you speak Spanish, run `./scripts/setup_model.sh es` to install the Spanish phonetic model. |
 | Mic blocked in SmartTube voice search | Accessibility service disabled | Enable Accessibility in Settings or run `adb shell settings put secure enabled_accessibility_services dev.nuc.okgoogle/.FgTracker`. |
