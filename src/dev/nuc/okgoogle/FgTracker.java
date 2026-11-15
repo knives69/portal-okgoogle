@@ -152,17 +152,45 @@ public class FgTracker extends AccessibilityService {
 
     private static void triggerAutoDismiss() {
         autoDismissScheduled = false;
-        dismissedForCurrentSession = true; // Lock out further dismiss calls until new invocation
-        Log.i(TAG, "triggerAutoDismiss fired! pkg=" + foregroundPackage);
         if (instance == null) return;
-        boolean stillAssistant = GSA.equalsIgnoreCase(foregroundPackage);
 
-        if (stillAssistant && !WakeService.isOtherAppRecording()) {
+        try {
+            AccessibilityNodeInfo root = instance.getRootInActiveWindow();
+            if (root != null && root.getPackageName() != null) {
+                foregroundPackage = root.getPackageName().toString();
+            }
+        } catch (Throwable ignored) { }
+
+        boolean stillAssistant = GSA.equalsIgnoreCase(foregroundPackage);
+        Log.i(TAG, "triggerAutoDismiss fired! pkg=" + foregroundPackage + " stillAssistant=" + stillAssistant);
+
+        if (stillAssistant) {
+            dismissedForCurrentSession = true;
             Log.i(TAG, "Assistant card idle timeout (12s) reached: auto-dismissing via BACK");
             boolean ok = instance.performGlobalAction(GLOBAL_ACTION_BACK);
             Log.i(TAG, "performGlobalAction(GLOBAL_ACTION_BACK) result=" + ok);
+
+            mainHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (instance != null) {
+                        try {
+                            AccessibilityNodeInfo r = instance.getRootInActiveWindow();
+                            if (r != null && r.getPackageName() != null) {
+                                foregroundPackage = r.getPackageName().toString();
+                            }
+                        } catch (Throwable ignored) { }
+
+                        if (GSA.equalsIgnoreCase(foregroundPackage)) {
+                            Log.i(TAG, "Assistant still visible after first BACK, sending secondary BACK");
+                            instance.performGlobalAction(GLOBAL_ACTION_BACK);
+                        }
+                    }
+                }
+            }, 500);
         } else {
-            Log.i(TAG, "triggerAutoDismiss skipped: stillAssistant=" + stillAssistant + " otherAppRec=" + WakeService.isOtherAppRecording());
+            dismissedForCurrentSession = true;
+            Log.i(TAG, "triggerAutoDismiss skipped: foreground is not Assistant (" + foregroundPackage + ")");
         }
     }
 

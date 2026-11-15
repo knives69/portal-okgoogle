@@ -65,12 +65,12 @@ public class WakeService extends Service {
         "ok gogol", "hey gogol",
         // Multilingual & Spanish model approximations
         "ok web", "ook web", "oque web", "oke web", "oke google", "okey gugel",
-        "oye google", "oye gugel", "hola google", "hola gugel"
+        "oye google", "oye gugel"
     };
 
     /** Constrains Vosk decoder graph to target keywords + unknown token, slashing CPU by 40-60%. */
     private static final String GRAMMAR =
-        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"hola google\", \"hola gugel\", \"[unk]\"]";
+        "[\"ok google\", \"hey google\", \"okay google\", \"ok gugel\", \"hey gugel\", \"ok web\", \"ook web\", \"oque web\", \"oke web\", \"oke google\", \"okey gugel\", \"oye google\", \"oye gugel\", \"[unk]\"]";
 
     private volatile boolean alive;
     private Model model;
