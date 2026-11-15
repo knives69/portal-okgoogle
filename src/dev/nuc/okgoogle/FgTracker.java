@@ -4,12 +4,16 @@ import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import java.lang.reflect.Method;
+import java.util.List;
 
 /**
  * FgTracker — Tracks foreground windows, yields microphone during speech dictation,
@@ -29,6 +33,8 @@ public class FgTracker extends AccessibilityService {
     static volatile boolean voiceInputActive = false;
     private static volatile boolean autoDismissScheduled = false;
     private static volatile boolean dismissedForCurrentSession = false;
+    private static volatile int speechPostponeCount = 0;
+    private static volatile boolean wasSpeaking = false;
 
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final Runnable autoDismissRunnable = new Runnable() {
@@ -113,6 +119,8 @@ public class FgTracker extends AccessibilityService {
     public static void onNewVoiceInvocation() {
         dismissedForCurrentSession = false;
         autoDismissScheduled = false;
+        speechPostponeCount = 0;
+        wasSpeaking = false;
     }
 
     private static void checkAssistantOverlayState() {
@@ -123,6 +131,8 @@ public class FgTracker extends AccessibilityService {
             scheduleAutoDismiss();
         } else {
             dismissedForCurrentSession = false;
+            speechPostponeCount = 0;
+            wasSpeaking = false;
             cancelAutoDismiss();
         }
     }
@@ -132,6 +142,8 @@ public class FgTracker extends AccessibilityService {
         if (!GSA.equalsIgnoreCase(foregroundPackage)) return;
         if (dismissedForCurrentSession) return;
         autoDismissScheduled = false;
+        speechPostponeCount = 0;
+        wasSpeaking = false;
         mainHandler.removeCallbacks(autoDismissRunnable);
         scheduleAutoDismiss();
     }
@@ -163,6 +175,44 @@ public class FgTracker extends AccessibilityService {
         }
     }
 
+    private static boolean isAssistantSpeaking() {
+        if (instance == null) return false;
+        AudioManager am = (AudioManager) instance.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                List<AudioPlaybackConfiguration> configs = am.getActivePlaybackConfigurations();
+                if (configs != null && !configs.isEmpty()) {
+                    int gsaUid = -1;
+                    try {
+                        gsaUid = instance.getPackageManager().getPackageUid(GSA, 0);
+                    } catch (Throwable ignored) { }
+
+                    if (gsaUid != -1) {
+                        for (AudioPlaybackConfiguration cfg : configs) {
+                            try {
+                                Method getClientUid = cfg.getClass().getDeclaredMethod("getClientUid");
+                                Method getPlayerState = cfg.getClass().getDeclaredMethod("getPlayerState");
+                                getClientUid.setAccessible(true);
+                                getPlayerState.setAccessible(true);
+                                Object uidObj = getClientUid.invoke(cfg);
+                                Object stateObj = getPlayerState.invoke(cfg);
+                                if (uidObj instanceof Integer && ((Integer) uidObj) == gsaUid) {
+                                    if (stateObj instanceof Integer && ((Integer) stateObj) == 2) {
+                                        return true; // GSA actively playing audio
+                                    }
+                                }
+                            } catch (Throwable ignored) { }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) { }
+        }
+
+        return am.isMusicActive();
+    }
+
     private static void triggerAutoDismiss() {
         autoDismissScheduled = false;
         if (instance == null) return;
@@ -184,6 +234,27 @@ public class FgTracker extends AccessibilityService {
                 mainHandler.postDelayed(autoDismissRunnable, 5000);
                 return;
             }
+
+            // Check if Assistant is actively speaking a spoken reply (news, recipe, TTS)
+            if (isAssistantSpeaking() && speechPostponeCount < 8) {
+                speechPostponeCount++;
+                wasSpeaking = true;
+                Log.i(TAG, "triggerAutoDismiss: assistant still speaking (TTS active), postponing 5s (count="
+                        + speechPostponeCount + "/8)");
+                autoDismissScheduled = true;
+                mainHandler.postDelayed(autoDismissRunnable, 5000);
+                return;
+            }
+
+            // If assistant just finished speaking a long response, grant the full 15s reading window
+            if (wasSpeaking) {
+                wasSpeaking = false;
+                Log.i(TAG, "triggerAutoDismiss: assistant finished speaking, granting 15s reading window");
+                autoDismissScheduled = true;
+                mainHandler.postDelayed(autoDismissRunnable, AUTO_DISMISS_DELAY_MS);
+                return;
+            }
+
             dismissedForCurrentSession = true;
             Log.i(TAG, "Assistant card idle timeout (15s) reached: auto-dismissing via BACK");
             instance.performGlobalAction(GLOBAL_ACTION_BACK);
