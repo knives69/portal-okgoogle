@@ -1,20 +1,27 @@
 # Portal Ok Google
 
-**Universal Offline Wake-Word Trigger for Meta Portal / Portal+ (Android 9 / API 28)**
+**Offline Wake-Word Trigger for Meta Portal+ 1st generation (`aloha`) · Android 9 / API 28**
+
+*Tested on that model only; other Portal models are untested (see the compatibility note below).*
 
 [![Release](https://img.shields.io/github/v/release/knives69/portal-okgoogle?style=flat-square)](https://github.com/knives69/portal-okgoogle/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Android%209%20(API%2028)-green.svg?style=flat-square)](https://android.com)
 
-An open-source, 24/7 background hotword service enabling hands-free **"Ok Google"** and **"Hey Google"** activation on rooted Meta Portal devices running Android 9 (such as via [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal)).
+An open-source, 24/7 background hotword service enabling hands-free **"Ok Google"** and **"Hey Google"** activation on Meta Portal devices running Android 9 (such as via [OpenPortal](https://github.com/CoderPlusPlus/OpenPortal)).
 
 Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with dynamic audio session arbitration, acoustic echo suppression, and seamless microphone handover.
+
+**No root required.** The app is an ordinary sideloaded APK: it needs `RECORD_AUDIO`, a foreground service and an accessibility service (to know what is on screen). Nothing it does touches `/system`, `/vendor`, `su` or SELinux state.
+
+> [!IMPORTANT]
+> **Tested scope:** only on **Meta Portal+ 1st generation (`aloha`), Android 9 / API 28**, with Google Play Services + GSA `17.6.59.ve.arm64` installed via OpenPortal. Other Portal models (Portal 10" Gen 1, Portal Mini, Go, TV, Gen 2) are **untested** — the code assumes a single external mic, `ACTION_VOICE_COMMAND` routed to GSA, and API 28 `AudioRecordingCallback` semantics.
 
 ---
 
 ## Key Features in v1.6.0
 
-- **100% Offline & Private:** Runs entirely on-device with Vosk Kaldi acoustic models (`vosk-model-small-en-us-0.15` or `vosk-model-small-es-0.42`). Zero cloud latency, zero audio telemetry.
+- **100% Offline & Private:** Runs entirely on-device with Vosk Kaldi acoustic models. Verified working build: **`vosk-model-small-es-0.22`** (Spanish, 66 MB) and **`vosk-model-small-en-us-0.15`** (English). Newer models (e.g. `vosk-model-small-es-0.42`) should work but have not been validated on this device — if you switch, re-check CPU/RAM (see *Resource usage*). Zero cloud latency, zero audio telemetry.
 - **Strict 4-Syllable Hotword Detection:** Constrained grammar lattice eliminating all conversational false positives.
 - **Adaptive Media Playback Suppression:** Dynamically elevates acoustic thresholds and hysteresis when media (TikTok, YouTube, Spotify) is playing through the Portal's own speakers, preventing speaker spillover from triggering false activations while still allowing close-range voice commands.
 - **Smart 15-Second Auto-Dismiss (Google Nest Hub Standard):** Automatically dismisses the Assistant overlay after 15 seconds of inactivity. Includes intelligent TTS reading window extension (postpones dismissal while Assistant speaks long news or recipes, then grants a full 15-second window to read suggestions).
@@ -70,7 +77,7 @@ Recognition is restricted to high-confidence 4-syllable phrases to guarantee zer
 
 ## Prerequisites
 
-1. **Meta Portal / Portal+** rooted and running Android 9 (Aloha/OpenPortal) with Google Play Services installed.
+1. **Meta Portal+ 1st generation (`aloha`)** running Android 9 (API 28) with Google Play Services installed (e.g. via OpenPortal). **Root is not required.** Only this model has been tested; other models are untested.
 2. **Google App (GSA):**
    - **Package:** `com.google.android.googlequicksearchbox`
    - **Verified Working Build:** **`17.6.59.ve.arm64`** (Version code: `301698282`, minSdk 28, targetSdk 36, `arm64-v8a`).
@@ -94,8 +101,11 @@ Run the included setup script from your computer to download and push the acoust
 # English US (default):
 ./scripts/setup_model.sh
 
-# Or Spanish:
+# Or Spanish (validated build vosk-model-small-es-0.22):
 ./scripts/setup_model.sh es
+
+# Try the newer Spanish model (untested on this device):
+VOSK_ES_MODEL=vosk-model-small-es-0.42 ./scripts/setup_model.sh es
 ```
 
 ### Step 2: Install the APK

@@ -13,7 +13,9 @@ CACHE_DIR="${TMPDIR:-/tmp}/vosk_cache"
 mkdir -p "${CACHE_DIR}"
 
 if [ "${LANG_CHOICE}" = "es" ]; then
-    MODEL_NAME="vosk-model-small-es-0.42"
+    # 0.22 is the build validated on the Portal+ (aloha): ~66 MB, CPU ~5-8 %, RAM ~130 MB.
+    # 0.42 is newer/better phonetically but UNTESTED on this device; set VOSK_ES_MODEL to try it.
+    MODEL_NAME="${VOSK_ES_MODEL:-vosk-model-small-es-0.22}"
     MODEL_URL="https://alphacephei.com/vosk/models/${MODEL_NAME}.zip"
     LOCAL_FALLBACK="${HOME}/portal-work/model/vosk-model-small-es-0.22"
 else
