@@ -22,6 +22,7 @@ public class StartReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent != null ? intent.getAction() : "";
+        WakeService.ensureAssistantConfigured(context);
         Intent serviceIntent = new Intent(context, WakeService.class);
         SharedPreferences sp = context.getSharedPreferences(FgTracker.PREFS_NAME, Context.MODE_PRIVATE);
 

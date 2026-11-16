@@ -93,6 +93,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        WakeService.ensureAccessibilityEnabled(this);
+        WakeService.ensureAssistantConfigured(this);
         startTelemetryLoop();
         refresh();
     }

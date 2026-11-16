@@ -131,6 +131,7 @@ public class WakeService extends Service {
         super.onCreate();
         instance = this;
         ensureAccessibilityEnabled(this);
+        ensureAssistantConfigured(this);
         acquireWakeLock();
         initSoundPool();
     }
@@ -154,8 +155,30 @@ public class WakeService extends Service {
         }
     }
 
+    private static final String TARGET_VAS = "com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService";
+    private static final String TARGET_ASSISTANT = "com.google.android.googlequicksearchbox/.GoogleAppImplicitActionAssistGatewayInternal";
+
+    public static void ensureAssistantConfigured(Context ctx) {
+        try {
+            String currentVas = Settings.Secure.getString(ctx.getContentResolver(), "voice_interaction_service");
+            if (currentVas == null || currentVas.isEmpty() || !TARGET_VAS.equals(currentVas)) {
+                Settings.Secure.putString(ctx.getContentResolver(), "voice_interaction_service", TARGET_VAS);
+                Log.i(TAG, "Auto-configured voice_interaction_service: " + TARGET_VAS);
+            }
+            String currentAssistant = Settings.Secure.getString(ctx.getContentResolver(), "assistant");
+            if (currentAssistant == null || currentAssistant.isEmpty()) {
+                Settings.Secure.putString(ctx.getContentResolver(), "assistant", TARGET_ASSISTANT);
+                Log.i(TAG, "Auto-configured assistant: " + TARGET_ASSISTANT);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to auto-configure assistant settings: " + t.getMessage());
+        }
+    }
+
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         try {
+            ensureAccessibilityEnabled(this);
+            ensureAssistantConfigured(this);
             channel();
             startForeground(1, notification("Listening for \"Ok Google\""));
         } catch (Throwable t) {
@@ -610,6 +633,7 @@ public class WakeService extends Service {
 
     public static void launchVoice(Context ctx) {
         try {
+            ensureAssistantConfigured(ctx);
             Intent i = new Intent(Intent.ACTION_VOICE_COMMAND);
             i.setPackage(GSA);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
