@@ -398,7 +398,7 @@ public class WakeService extends Service {
             }
 
             // Brief pause allowing Qualcomm HAL to transition input stream to standby
-            sleep(250);
+            sleep(150);
             launchVoice(this);
 
             // Arm auto-dismiss timer on assistant window (reset session lock)
@@ -634,13 +634,13 @@ public class WakeService extends Service {
     public static void launchVoice(Context ctx) {
         try {
             ensureAssistantConfigured(ctx);
-            Intent i = new Intent("android.intent.action.VOICE_ASSIST");
+            Intent i = new Intent(Intent.ACTION_VOICE_COMMAND);
             i.setPackage(GSA);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            Log.i(TAG, "Launching VOICE_ASSIST to Google Assistant");
+            Log.i(TAG, "Launching VOICE_COMMAND (transient bottom popup) to Google Assistant");
             ctx.startActivity(i);
         } catch (Throwable t) {
-            Log.e(TAG, "Failed to launch VOICE_ASSIST", t);
+            Log.e(TAG, "Failed to launch VOICE_COMMAND", t);
         }
     }
 
