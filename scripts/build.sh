@@ -16,6 +16,8 @@ if [ -z "${ANDROID_JAR:-}" ]; then
         "${ANDROID_HOME:-}/platforms/android-30/android.jar"
         "${ANDROID_HOME:-}/platforms/android-31/android.jar"
         "${ANDROID_HOME:-}/platforms/android-28/android.jar"
+        "${HOME}/android-sdk/platforms/android-29/android.jar"
+        "${HOME}/android-sdk/platforms/android-28/android.jar"
         "/usr/lib/android-sdk/platforms/android-29/android.jar"
         "/usr/lib/android-sdk/platforms/android-28/android.jar"
         "${HOME}/portal-work/tools/android-29.jar"
