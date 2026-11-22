@@ -634,13 +634,13 @@ public class WakeService extends Service {
     public static void launchVoice(Context ctx) {
         try {
             ensureAssistantConfigured(ctx);
-            Intent i = new Intent(Intent.ACTION_VOICE_COMMAND);
+            Intent i = new Intent("android.intent.action.VOICE_ASSIST");
             i.setPackage(GSA);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            Log.i(TAG, "Launching VOICE_COMMAND to Google Assistant");
+            Log.i(TAG, "Launching VOICE_ASSIST to Google Assistant");
             ctx.startActivity(i);
         } catch (Throwable t) {
-            Log.e(TAG, "Failed to launch VOICE_COMMAND", t);
+            Log.e(TAG, "Failed to launch VOICE_ASSIST", t);
         }
     }
 

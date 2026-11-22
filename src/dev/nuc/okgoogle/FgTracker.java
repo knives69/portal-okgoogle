@@ -305,7 +305,7 @@ public class FgTracker extends AccessibilityService {
 
         // GSA-specific transient assistant dialogs
         if (p.equals(GSA)) {
-            return c.contains("intentapi") || c.contains("handsfreeactivity");
+            return c.contains("intentapi") || c.contains("handsfreeactivity") || c.contains("voiceassist") || c.contains("googleappactivity");
         }
 
         return false;
