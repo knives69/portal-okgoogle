@@ -19,10 +19,12 @@ Powered by [Vosk](https://alphacephei.com/vosk/) offline speech recognition with
 
 ---
 
-## Key Features in v1.6.0
+## Key Features in v1.6.3
 
 - **100% Offline & Private:** Runs entirely on-device with Vosk Kaldi acoustic models. Verified working build: **`vosk-model-small-es-0.22`** (Spanish, 66 MB) and **`vosk-model-small-en-us-0.15`** (English). Newer models (e.g. `vosk-model-small-es-0.42`) should work but have not been validated on this device — if you switch, re-check CPU/RAM (see *Resource usage*). Zero cloud latency, zero audio telemetry.
 - **Strict 4-Syllable Hotword Detection:** Constrained grammar lattice eliminating all conversational false positives.
+- **Diminutive Floating Assistant Overlay:** Launches Assistant via targeted `ACTION_VOICE_COMMAND`, preserving the compact bottom transient sheet (`FragmentHostTransientActivity`) rather than an intrusive full-screen activity.
+- **Ultra-Low Latency Handover (150 ms):** Optimized audio transition timing granting Qualcomm's audio HAL immediate standby release for Google speech recognition.
 - **Adaptive Media Playback Suppression:** Dynamically elevates acoustic thresholds and hysteresis when media (TikTok, YouTube, Spotify) is playing through the Portal's own speakers, preventing speaker spillover from triggering false activations while still allowing close-range voice commands.
 - **Smart 15-Second Auto-Dismiss (Google Nest Hub Standard):** Automatically dismisses the Assistant overlay after 15 seconds of inactivity. Includes intelligent TTS reading window extension (postpones dismissal while Assistant speaks long news or recipes, then grants a full 15-second window to read suggestions).
 - **Pure BACK Dismissal (No Recents Trigger):** Dismisses Assistant using a clean two-stage `GLOBAL_ACTION_BACK` sequence without injecting `HOME` events that could inadvertently open the Android task switcher.
@@ -255,6 +257,7 @@ The script automatically detects build tools in your `PATH` or `$ANDROID_HOME` a
 | Mic blocked in SmartTube voice search | Accessibility service disabled | Enable Accessibility in Settings or run `adb shell settings put secure enabled_accessibility_services dev.nuc.okgoogle/.FgTracker`. |
 | Assistant card does not close after 15s | Accessibility service not running or permission missing | Grant secure settings via `adb shell pm grant dev.nuc.okgoogle android.permission.WRITE_SECURE_SETTINGS` and restart the service. |
 | Assistant triggers repeatedly while watching videos | Outdated app version with loose grammar | Upgrade to `v1.6.0+` which includes adaptive media suppression and strict 4-syllable hotwords. |
+| Assistant hears query but replies "Perdona, no te he entendido" / timeout | Google Assistant onboarding (OOBE) incomplete or audio muted | Launch Assistant (`adb shell am start -a android.intent.action.VOICE_COMMAND -p com.google.android.googlequicksearchbox`), tap "EMPEZAR" / "Siguiente" to complete initial consent, and ensure streams are unmuted (`dumpsys audio`). |
 
 ---
 
